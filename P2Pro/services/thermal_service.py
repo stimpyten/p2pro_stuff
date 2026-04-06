@@ -209,7 +209,6 @@ class ThermalService:
             return None
 
         min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(thermal)
-
         temp_min_val = self.thermal_to_celsius(min_val)
         temp_max_val = self.thermal_to_celsius(max_val)
 
@@ -334,7 +333,8 @@ class ThermalService:
                 self.rgb_writer.release()
                 self.rgb_writer = None
 
-            if self.raw_frames:
+            # Fix: Nur speichern wenn auch Frames aufgenommen wurden
+            if len(self.raw_frames) > 0:
                 np.save(os.path.join(recording_dir, "rawframes.npy"), np.stack(self.raw_frames, axis=0))
 
             data = {"measure_points": [[int(x), int(y)] for (x, y) in self.measure_points]}
@@ -342,30 +342,27 @@ class ThermalService:
                 json.dump(data, handle, indent=2)
 
             avi_path = os.path.join(recording_dir, "video.avi")
-            mkv_path = os.path.join(recording_dir, "video.mkv")
+            mp4_path = os.path.join(recording_dir, "video.mp4")
+            
+            # AVI in Web-freundliches MP4 (H.264) umwandeln
             if os.path.exists(avi_path):
                 try:
                     subprocess.run(
                         [
-                            "ffmpeg",
-                            "-y",
-                            "-i",
-                            avi_path,
-                            "-c:v",
-                            "libx264",
-                            "-crf",
-                            "20",
-                            "-pix_fmt",
-                            "yuv420p",
-                            mkv_path,
+                            "ffmpeg", "-y", "-i", avi_path,
+                            "-c:v", "libx264", "-crf", "23",
+                            "-preset", "fast", "-pix_fmt", "yuv420p",
+                            mp4_path
                         ],
                         check=True,
                         capture_output=True,
                         text=True,
                     )
-                    os.remove(avi_path)
+                    os.remove(avi_path) # Original löschen wenn erfolgreich
+                except FileNotFoundError:
+                    print("[WARN] ffmpeg ist nicht installiert! Das Video bleibt im .avi Format.")
                 except Exception as exc:
-                    print(f"[WARN] ffmpeg-Umwandlung oder Löschen fehlgeschlagen: {exc}")
+                    print(f"[WARN] ffmpeg-Umwandlung fehlgeschlagen: {exc}")
 
             self.raw_frames = []
             return recording_dir
@@ -379,17 +376,13 @@ class ThermalService:
             return {"is_recording": True, "recording_dir": path}
 
     def build_colormap_bar(self) -> np.ndarray:
-        """Erzeugt ein schmales Bild, das den aktuellen Farbverlauf (Palette) darstellt."""
         cv_colormap = OPENCV_COLORMAP_MAP.get(self.palette_name, None)
-        
-        # Verlauf von 255 (Oben/Heiß) bis 0 (Unten/Kalt)
         gradient = np.linspace(255, 0, 256).astype(np.uint8).reshape((256, 1))
         
         if cv_colormap is not None:
             bar_rgb = cv2.applyColorMap(gradient, cv_colormap)
             bar_rgb = cv2.cvtColor(bar_rgb, cv2.COLOR_BGR2RGB)
         else:
-            # Fallback für Grayscale ("White Hot")
             bar_rgb = np.repeat(gradient, 3, axis=1).reshape((256, 1, 3))
             
         return bar_rgb

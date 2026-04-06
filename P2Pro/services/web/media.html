@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>P2Pro Media Viewer</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #181c23;
+      --panel2: #222833;
+      --text: #e9edf3;
+      --muted: #aab3c2;
+      --border: #2d3440;
+      --accent: #3f8cff;
+      --hover: #2a313d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Arial, sans-serif;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 24px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+    }
+    a.back {
+      color: #9cc6ff;
+      text-decoration: none;
+    }
+    h1 { margin: 0; font-size: 20px; }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      gap: 16px;
+      padding: 24px 24px 0 24px;
+    }
+    .tab {
+      padding: 10px 20px;
+      background: var(--panel2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--muted);
+      cursor: pointer;
+      font-weight: bold;
+    }
+    .tab.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+
+    /* Grid */
+    .gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 16px;
+      padding: 24px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+    .card:hover {
+      transform: translateY(-4px);
+      border-color: var(--accent);
+    }
+    .card img, .card .video-placeholder {
+      width: 100%;
+      height: 160px;
+      object-fit: cover;
+      background: #000;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-size: 40px;
+    }
+    .card-title {
+      padding: 12px;
+      font-size: 13px;
+      word-break: break-all;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    /* Modal / Lightbox */
+    #modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.95); /* Etwas dunkler */
+      z-index: 100;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+    }
+    #modal.open { display: flex; }
+    
+    #modal-close {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: var(--panel2);
+      color: #fff;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 16px;
+      cursor: pointer;
+      font-size: 14px;
+      z-index: 101;
+    }
+
+    /* Das eigentliche Bild / Video im Vollbild */
+    #modal-content {
+      width: 100%;
+      height: auto;
+      max-width: 90vw;
+      max-height: 85vh;
+      object-fit: contain; /* Erhält Proportionen */
+      image-rendering: pixelated; /* Bei Wärmebildern oft besser, wenn sie klein sind */
+      border-radius: 8px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+    
+    #modal-title {
+      margin-top: 16px;
+      color: var(--text);
+      font-size: 16px;
+      font-weight: bold;
+      background: rgba(0,0,0,0.5);
+      padding: 6px 12px;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+
+  <header class="header">
+    <a class="back" href="/">← Zur Startseite</a>
+    <h1>🖼️ Media Viewer</h1>
+    <div style="width: 100px;"></div> <!-- Spacer für Zentrierung -->
+  </header>
+
+  <div class="tabs">
+    <div class="tab active" id="tab-screenshots" onclick="switchTab('screenshots')">📸 Screenshots</div>
+    <div class="tab" id="tab-videos" onclick="switchTab('videos')">🎬 Videos</div>
+  </div>
+
+  <div class="gallery" id="gallery">
+    <p style="grid-column: 1/-1; color: var(--muted);">Lade Dateien...</p>
+  </div>
+
+  <!-- Vollbild Lightbox -->
+  <div id="modal">
+    <button id="modal-close" onclick="closeModal()">Schließen</button>
+    <div id="modal-body" style="display: flex; flex-direction: column; align-items: center; width: 100%;"></div>
+  </div>
+
+  <script>
+    let mediaData = { screenshots: [], videos: [] };
+    let currentTab = 'screenshots';
+
+    async function loadFiles() {
+      try {
+        const res = await fetch("/api/files");
+        if (!res.ok) throw new Error("Fehler beim Laden");
+        mediaData = await res.json();
+        renderGallery();
+      } catch (e) {
+        document.getElementById("gallery").innerHTML = `<p style="grid-column: 1/-1; color: #ff4757;">Fehler beim Laden der Dateien.</p>`;
+      }
+    }
+
+    function switchTab(tab) {
+      currentTab = tab;
+      document.getElementById("tab-screenshots").classList.remove("active");
+      document.getElementById("tab-videos").classList.remove("active");
+      document.getElementById(`tab-${tab}`).classList.add("active");
+      renderGallery();
+    }
+
+    function formatTime(timestamp) {
+      const d = new Date(timestamp * 1000);
+      return d.toLocaleString("de-DE", { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
+    function renderGallery() {
+      const gallery = document.getElementById("gallery");
+      const items = mediaData[currentTab];
+      
+      if (!items || items.length === 0) {
+        gallery.innerHTML = `<p style="grid-column: 1/-1; color: var(--muted); text-align: center; margin-top: 40px;">Keine ${currentTab === 'screenshots' ? 'Bilder' : 'Videos'} gefunden.</p>`;
+        return;
+      }
+
+      gallery.innerHTML = items.map(item => {
+        if (currentTab === 'screenshots') {
+          return `
+            <div class="card" onclick="openModal('image', '${item.url}', '${item.name}')">
+              <img src="${item.url}" loading="lazy" alt="${item.name}">
+              <div class="card-title">${formatTime(item.time)}<br><small>${item.name}</small></div>
+            </div>`;
+        } else {
+          return `
+            <div class="card" onclick="openModal('video', '${item.url}', '${item.name}')">
+              <div class="video-placeholder">▶️</div>
+              <div class="card-title">${formatTime(item.time)}<br><small>${item.name}</small></div>
+            </div>`;
+        }
+      }).join('');
+    }
+
+    function openModal(type, url, title) {
+      const modal = document.getElementById("modal");
+      const body = document.getElementById("modal-body");
+      
+      if (type === 'image') {
+        body.innerHTML = `
+          <img id="modal-content" src="${url}" alt="${title}">
+          <div id="modal-title">${title}</div>
+        `;
+      } else if (type === 'video') {
+        body.innerHTML = `
+          <video id="modal-content" controls autoplay loop>
+            <source src="${url}" type="video/mp4">
+            <source src="${url}" type="video/x-matroska">
+            <source src="${url}" type="video/avi">
+            Dein Browser unterstützt dieses Videoformat leider nicht.
+          </video>
+          <div id="modal-title">${title}</div>
+        `;
+      }
+      modal.classList.add("open");
+    }
+
+    function closeModal() {
+      document.getElementById("modal").classList.remove("open");
+      document.getElementById("modal-body").innerHTML = ""; // Stoppt Videos sofort
+    }
+
+    // Modal per Escape-Taste oder Klick auf Hintergrund schließen
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeModal();
+    });
+    document.getElementById("modal").addEventListener("click", (e) => {
+      if (e.target.id === "modal") closeModal(); // Nur schließen wenn man daneben klickt
+    });
+
+    loadFiles();
+  </script>
+</body>
+</html>
