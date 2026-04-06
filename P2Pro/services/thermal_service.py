@@ -162,6 +162,37 @@ class ThermalService:
         with self._lock:
             return list(self.measure_points)
 
+    def thermal_to_celsius(self, raw_value: float) -> float:
+        return round((float(raw_value) / 64.0) - 273.15, 1)
+
+    def get_point_temperature(self, x: int, y: int) -> Optional[float]:
+        with self._lock:
+            if self.last_thermal is None:
+                return None
+            thermal = self.last_thermal
+
+            h, w = thermal.shape[:2]
+            x = max(0, min(int(x), w - 1))
+            y = max(0, min(int(y), h - 1))
+
+            raw_value = thermal[y, x]
+            return self.thermal_to_celsius(raw_value)
+
+    def get_measure_points_with_temperatures(self) -> List[Dict[str, Optional[float]]]:
+        with self._lock:
+            points = list(self.measure_points)
+
+        result: List[Dict[str, Optional[float]]] = []
+        for x, y in points:
+            result.append(
+                {
+                    "x": int(x),
+                    "y": int(y),
+                    "temp_c": self.get_point_temperature(x, y),
+                }
+            )
+        return result
+
     def _make_snapshot(self, frame_data: dict) -> Optional[FrameSnapshot]:
         thermal = frame_data.get("thermal_data")
         rgb_picture = frame_data.get("rgb_data")
@@ -170,8 +201,8 @@ class ThermalService:
         if thermal is None or rgb_picture is None:
             return None
 
-        temp_min_val = round((float(np.min(thermal)) / 64.0) - 273.16, 1)
-        temp_max_val = round((float(np.max(thermal)) / 64.0) - 273.16, 1)
+        temp_min_val = self.thermal_to_celsius(np.min(thermal))
+        temp_max_val = self.thermal_to_celsius(np.max(thermal))
 
         snapshot = FrameSnapshot(
             frame_num=frame_num,
@@ -335,7 +366,7 @@ class ThermalService:
     def build_colormap_bar(self, temp_min: float, temp_max: float) -> np.ndarray:
         cv_colormap = OPENCV_COLORMAP_MAP.get(self.palette_name, None)
         temps_c = np.linspace(temp_max, temp_min, 256)
-        rawvals = np.clip((temps_c + 273.16) * 64.0, 0, 65535).astype(np.uint16)
+        rawvals = np.clip((temps_c + 273.15) * 64.0, 0, 65535).astype(np.uint16)
         ptp_val = np.ptp(rawvals) + 1e-8
         norm = ((rawvals - rawvals.min()) / ptp_val * 255).astype(np.uint8)
         bar = norm.reshape((256, 1))

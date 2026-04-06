@@ -37,12 +37,26 @@
       border-radius: 16px;
       padding: 14px;
     }
+    .stream-wrap {
+      position: relative;
+      width: 100%;
+      background: #000;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
     .stream {
       width: 100%;
       display: block;
       background: #000;
-      border-radius: 12px;
-      border: 1px solid var(--border);
+    }
+    .overlay {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: auto;
+      cursor: crosshair;
     }
     .row {
       display: flex;
@@ -132,7 +146,10 @@
         <span class="pill" id="paletteState">Palette: -</span>
       </div>
 
-      <img id="liveImage" class="stream" src="/api/stream" alt="Livebild" />
+      <div class="stream-wrap" id="streamWrap">
+        <img id="liveImage" class="stream" src="/api/stream" alt="Livebild" />
+        <canvas id="overlay" class="overlay"></canvas>
+      </div>
 
       <div class="row" style="margin-top: 12px;">
         <button id="reconnectBtn" class="primary">Stream neu verbinden</button>
@@ -172,19 +189,21 @@
           <div id="pointsState" class="value">-</div>
         </div>
         <div class="status-item">
-          <div class="label">Status</div>
-          <div class="value">Live aktiv</div>
+          <div class="label">Temperaturbereich</div>
+          <div id="tempRangeState" class="value">-</div>
         </div>
       </div>
 
       <p class="note" style="margin-top: 14px;">
-        Palette wird sofort beim Auswählen gesetzt. Emissivität wird automatisch nach Änderung übernommen.
+        Klick ins Bild setzt einen Messpunkt. Klick nahe an einem bestehenden Punkt löscht ihn wieder. Die Temperatur erscheint direkt am Marker.
       </p>
     </aside>
   </div>
 
   <script>
     const liveImage = document.getElementById("liveImage");
+    const overlay = document.getElementById("overlay");
+
     const connState = document.getElementById("connState");
     const recState = document.getElementById("recState");
     const gainState = document.getElementById("gainState");
@@ -192,12 +211,17 @@
     const cameraState = document.getElementById("cameraState");
     const frameState = document.getElementById("frameState");
     const pointsState = document.getElementById("pointsState");
+    const tempRangeState = document.getElementById("tempRangeState");
     const paletteSelect = document.getElementById("paletteSelect");
     const emissivityInput = document.getElementById("emissivityInput");
     const feedback = document.getElementById("feedback");
 
     let emissivityTimer = null;
     let suppressPaletteChange = false;
+
+    let frameWidth = 0;
+    let frameHeight = 0;
+    let currentPoints = [];
 
     async function apiGet(url) {
       const res = await fetch(url);
@@ -228,6 +252,85 @@
       setFeedback("Stream neu verbunden.");
     }
 
+    function resizeOverlay() {
+      const rect = liveImage.getBoundingClientRect();
+      overlay.width = Math.max(1, Math.round(rect.width));
+      overlay.height = Math.max(1, Math.round(rect.height));
+      drawPoints();
+    }
+
+    function drawPointLabel(ctx, x, y, label) {
+      ctx.font = "13px Arial";
+      const paddingX = 6;
+      const paddingY = 4;
+      const textWidth = ctx.measureText(label).width;
+      const boxWidth = textWidth + paddingX * 2;
+      const boxHeight = 22;
+
+      let boxX = x + 12;
+      let boxY = y - 30;
+
+      if (boxX + boxWidth > overlay.width) {
+        boxX = x - boxWidth - 12;
+      }
+      if (boxY < 0) {
+        boxY = y + 12;
+      }
+
+      ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+      ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+
+      ctx.strokeStyle = "rgba(255,255,255,0.35)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+
+      ctx.fillStyle = "rgba(255,255,255,0.95)";
+      ctx.fillText(label, boxX + paddingX, boxY + 15);
+    }
+
+    function drawPoints() {
+      const ctx = overlay.getContext("2d");
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+      if (!frameWidth || !frameHeight) return;
+
+      for (let i = 0; i < currentPoints.length; i++) {
+        const point = currentPoints[i];
+        const px = point.x;
+        const py = point.y;
+
+        const x = (px / frameWidth) * overlay.width;
+        const y = (py / frameHeight) * overlay.height;
+
+        ctx.beginPath();
+        ctx.arc(x, y, 7, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255, 80, 80, 0.95)";
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "rgba(255,255,255,0.95)";
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(x - 12, y);
+        ctx.lineTo(x + 12, y);
+        ctx.moveTo(x, y - 12);
+        ctx.lineTo(x, y + 12);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+        ctx.stroke();
+
+        ctx.font = "14px Arial";
+        ctx.fillStyle = "rgba(255,255,255,0.95)";
+        ctx.fillText(String(i + 1), x + 10, y - 10);
+
+        const tempText = point.temp_c === null || point.temp_c === undefined
+          ? `P${i + 1}: --.- °C`
+          : `P${i + 1}: ${point.temp_c.toFixed(1)} °C`;
+
+        drawPointLabel(ctx, x, y, tempText);
+      }
+    }
+
     async function loadStatus() {
       try {
         const data = await apiGet("/api/status");
@@ -237,7 +340,28 @@
         paletteState.textContent = `Palette: ${data.palette}`;
         cameraState.textContent = data.camera_initialized ? "initialisiert" : "nicht initialisiert";
         frameState.textContent = String(data.last_frame_num);
-        pointsState.textContent = Array.isArray(data.points) ? String(data.points.length) : "-";
+
+        if (typeof data.frame_width === "number" && typeof data.frame_height === "number") {
+          frameWidth = data.frame_width;
+          frameHeight = data.frame_height;
+        }
+
+        if (Array.isArray(data.points_with_temp)) {
+          currentPoints = data.points_with_temp;
+          pointsState.textContent = String(currentPoints.length);
+        } else if (Array.isArray(data.points)) {
+          currentPoints = data.points.map(([x, y]) => ({ x, y, temp_c: null }));
+          pointsState.textContent = String(currentPoints.length);
+        } else {
+          currentPoints = [];
+          pointsState.textContent = "-";
+        }
+
+        if (typeof data.temp_min_c === "number" && typeof data.temp_max_c === "number") {
+          tempRangeState.textContent = `${data.temp_min_c} °C bis ${data.temp_max_c} °C`;
+        } else {
+          tempRangeState.textContent = "-";
+        }
 
         if (Array.isArray(data.available_palettes) && paletteSelect.options.length === 0) {
           suppressPaletteChange = true;
@@ -254,6 +378,8 @@
           paletteSelect.value = data.palette;
           suppressPaletteChange = false;
         }
+
+        drawPoints();
       } catch (err) {
         connState.textContent = "Fehler";
         console.error(err);
@@ -305,12 +431,37 @@
     }
 
     function scheduleEmissivityApply() {
-      if (emissivityTimer) {
-        clearTimeout(emissivityTimer);
-      }
+      if (emissivityTimer) clearTimeout(emissivityTimer);
       emissivityTimer = setTimeout(() => {
         applyEmissivity();
       }, 450);
+    }
+
+    async function handleOverlayClick(event) {
+      if (!frameWidth || !frameHeight) {
+        setFeedback("Noch keine Bildgröße verfügbar.", true);
+        return;
+      }
+
+      const rect = overlay.getBoundingClientRect();
+      const displayX = event.clientX - rect.left;
+      const displayY = event.clientY - rect.top;
+
+      const imageX = Math.round((displayX / rect.width) * frameWidth);
+      const imageY = Math.round((displayY / rect.height) * frameHeight);
+
+      try {
+        const result = await apiPost("/api/point", { x: imageX, y: imageY });
+        if (Array.isArray(result.points_with_temp)) {
+          currentPoints = result.points_with_temp;
+          pointsState.textContent = String(currentPoints.length);
+        }
+        drawPoints();
+        setFeedback(`Messpunkt aktualisiert bei (${imageX}, ${imageY}).`);
+      } catch (err) {
+        console.error(err);
+        setFeedback("Messpunkt konnte nicht gesetzt werden.", true);
+      }
     }
 
     document.getElementById("reconnectBtn").addEventListener("click", reconnectStream);
@@ -367,15 +518,19 @@
     });
 
     paletteSelect.addEventListener("change", applyPalette);
-
     emissivityInput.addEventListener("input", scheduleEmissivityApply);
     emissivityInput.addEventListener("change", applyEmissivity);
     emissivityInput.addEventListener("blur", applyEmissivity);
+
+    overlay.addEventListener("click", handleOverlayClick);
+    liveImage.addEventListener("load", resizeOverlay);
+    window.addEventListener("resize", resizeOverlay);
 
     setInterval(loadStatus, 1000);
 
     reconnectStream();
     loadStatus();
+    resizeOverlay();
   </script>
 </body>
 </html>

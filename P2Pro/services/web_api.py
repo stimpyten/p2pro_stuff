@@ -32,7 +32,7 @@ def json_bytes(data: Any) -> bytes:
 
 
 class RequestHandler(BaseHTTPRequestHandler):
-    server_version = "P2ProWebAPI/0.6"
+    server_version = "P2ProWebAPI/0.8"
 
     def log_message(self, format: str, *args) -> None:
         print(f"[HTTP] {self.address_string()} - {format % args}")
@@ -129,6 +129,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._handle_gain()
             elif parsed.path == "/api/emissivity":
                 self._handle_emissivity()
+            elif parsed.path == "/api/point":
+                self._handle_point()
             else:
                 self._send_json({"error": "Not Found"}, status=404)
         except Exception as exc:
@@ -137,14 +139,31 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _handle_status(self) -> None:
         ensure_thermal_started()
+        snapshot = thermal.get_latest_frame()
+
+        frame_width = None
+        frame_height = None
+        temp_min_c = None
+        temp_max_c = None
+
+        if snapshot is not None and snapshot.rgb_data is not None:
+            frame_height, frame_width = snapshot.rgb_data.shape[:2]
+            temp_min_c = snapshot.temp_min_c
+            temp_max_c = snapshot.temp_max_c
+
         data = {
             "camera_initialized": thermal.camera_initialized,
             "recording": thermal.is_recording,
             "palette": thermal.palette_name,
             "gain": thermal.gain_state,
             "points": thermal.get_measure_points(),
+            "points_with_temp": thermal.get_measure_points_with_temperatures(),
             "last_frame_num": thermal.last_frame_num,
             "available_palettes": PALETTE_NAMES,
+            "frame_width": frame_width,
+            "frame_height": frame_height,
+            "temp_min_c": temp_min_c,
+            "temp_max_c": temp_max_c,
         }
         self._send_json(data)
 
@@ -259,6 +278,19 @@ class RequestHandler(BaseHTTPRequestHandler):
         emissivity = float(emissivity)
         thermal.set_emissivity(emissivity)
         self._send_json({"emissivity": emissivity})
+
+    def _handle_point(self) -> None:
+        ensure_thermal_started()
+        data = self._read_json_body()
+
+        x = data.get("x")
+        y = data.get("y")
+        if x is None or y is None:
+            self._send_json({"error": "missing_coordinates"}, status=400)
+            return
+
+        thermal.toggle_measure_point(int(round(float(x))), int(round(float(y))))
+        self._send_json({"points_with_temp": thermal.get_measure_points_with_temperatures()})
 
 
 def run_server(host: str = "0.0.0.0", port: int = 8080) -> None:
