@@ -14,14 +14,20 @@
       --border: #2d3440;
       --accent: #3f8cff;
       --hover: #2a313d;
+      --ok: #245942;
+      --danger: #7e3140;
+      --warn: #7a6427;
     }
+
     * { box-sizing: border-box; }
+
     body {
       margin: 0;
       background: var(--bg);
       color: var(--text);
       font-family: Arial, sans-serif;
     }
+
     .header {
       display: flex;
       justify-content: space-between;
@@ -30,18 +36,23 @@
       background: var(--panel);
       border-bottom: 1px solid var(--border);
     }
+
     a.back {
       color: #9cc6ff;
       text-decoration: none;
     }
-    h1 { margin: 0; font-size: 20px; }
 
-    /* Tabs */
+    h1 {
+      margin: 0;
+      font-size: 20px;
+    }
+
     .tabs {
       display: flex;
       gap: 16px;
       padding: 24px 24px 0 24px;
     }
+
     .tab {
       padding: 10px 20px;
       background: var(--panel2);
@@ -51,19 +62,20 @@
       cursor: pointer;
       font-weight: bold;
     }
+
     .tab.active {
       background: var(--accent);
       color: #fff;
       border-color: var(--accent);
     }
 
-    /* Grid */
     .gallery {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
       gap: 16px;
       padding: 24px;
     }
+
     .card {
       background: var(--panel);
       border: 1px solid var(--border);
@@ -72,11 +84,14 @@
       cursor: pointer;
       transition: transform 0.2s;
     }
+
     .card:hover {
       transform: translateY(-4px);
       border-color: var(--accent);
     }
-    .card img, .card .video-placeholder {
+
+    .card img,
+    .card .video-placeholder {
       width: 100%;
       height: 160px;
       object-fit: cover;
@@ -86,6 +101,7 @@
       align-items: center;
       font-size: 40px;
     }
+
     .card-title {
       padding: 12px;
       font-size: 13px;
@@ -94,19 +110,18 @@
       text-align: center;
     }
 
-    /* Modal / Lightbox */
     #modal {
       display: none;
       position: fixed;
       inset: 0;
-      background: rgba(0,0,0,0.95); /* Etwas dunkler */
+      background: rgba(0,0,0,0.95);
       z-index: 100;
-      justify-content: center;
-      align-items: center;
-      flex-direction: column;
     }
-    #modal.open { display: flex; }
-    
+
+    #modal.open {
+      display: block;
+    }
+
     #modal-close {
       position: absolute;
       top: 20px;
@@ -121,35 +136,161 @@
       z-index: 101;
     }
 
-    /* Das eigentliche Bild / Video im Vollbild */
-    #modal-content {
-      width: 100%;
-      height: auto;
-      max-width: 90vw;
-      max-height: 85vh;
-      object-fit: contain; /* Erhält Proportionen */
-      image-rendering: pixelated; /* Bei Wärmebildern oft besser, wenn sie klein sind */
-      border-radius: 8px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    #modal-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.5fr) minmax(320px, 0.7fr);
+      gap: 16px;
+      padding: 24px;
+      min-height: 100vh;
+      align-items: start;
     }
-    
-    #modal-title {
-      margin-top: 16px;
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 14px;
+    }
+
+    .viewer-wrap {
+      position: relative;
+      width: 100%;
+      background: #000;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+
+    #modal-image,
+    #modal-video {
+      width: 100%;
+      display: block;
+      background: #000;
+      max-height: 78vh;
+      object-fit: contain;
+      image-rendering: pixelated;
+    }
+
+    #modal-video {
+      outline: none;
+    }
+
+    #modal-overlay {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: auto;
+      cursor: crosshair;
+    }
+
+    .row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    button, input[type="range"] {
+      background: var(--panel2);
       color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 14px;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .ok { background: var(--ok); }
+    .danger { background: var(--danger); }
+    .warn { background: var(--warn); }
+
+    .pill {
+      display: inline-block;
+      padding: 5px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      border: 1px solid var(--border);
+      background: var(--panel2);
+    }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .status-item {
+      background: var(--panel2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px;
+    }
+
+    .label {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .value {
       font-size: 16px;
-      font-weight: bold;
-      background: rgba(0,0,0,0.5);
-      padding: 6px 12px;
-      border-radius: 6px;
+      font-weight: 600;
+      word-break: break-word;
+    }
+
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+      cursor: pointer;
+    }
+
+    .checkbox-row input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    #modal-feedback {
+      min-height: 22px;
+      font-size: 14px;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+
+    .busy {
+      outline: 1px solid var(--accent);
+    }
+
+    #frameControls {
+      display: none;
+    }
+
+    #frameSlider {
+      width: 100%;
+      padding: 0;
+    }
+
+    @media (max-width: 1100px) {
+      #modal-layout {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
 <body>
-
   <header class="header">
     <a class="back" href="/">← Zur Startseite</a>
     <h1>🖼️ Media Viewer</h1>
-    <div style="width: 100px;"></div> <!-- Spacer für Zentrierung -->
+    <div style="width: 100px;"></div>
   </header>
 
   <div class="tabs">
@@ -161,25 +302,169 @@
     <p style="grid-column: 1/-1; color: var(--muted);">Lade Dateien...</p>
   </div>
 
-  <!-- Vollbild Lightbox -->
   <div id="modal">
     <button id="modal-close" onclick="closeModal()">Schließen</button>
-    <div id="modal-body" style="display: flex; flex-direction: column; align-items: center; width: 100%;"></div>
+
+    <div id="modal-layout">
+      <section class="panel">
+        <div class="row" style="justify-content: space-between;">
+          <h2 id="modal-title" style="margin: 0;">-</h2>
+          <span class="pill" id="mediaTypeState">-</span>
+        </div>
+
+        <div class="viewer-wrap" id="viewerWrap">
+          <img id="modal-image" alt="" style="display:none;" />
+          <video id="modal-video" controls preload="metadata" style="display:none;">
+            <source id="modal-video-source" src="" type="video/mp4">
+          </video>
+          <canvas id="modal-overlay"></canvas>
+        </div>
+
+        <div class="row" style="margin-top: 12px;">
+          <button id="savePointsBtn" class="ok">Messpunkte speichern</button>
+          <button id="saveFrameBtn" class="warn" style="display:none;">Aktuellen Frame als Screenshot speichern</button>
+        </div>
+
+        <div id="frameControls">
+          <div class="row" style="margin-top: 12px; margin-bottom: 6px;">
+            <button id="prevFrameBtn">◀ Frame</button>
+            <button id="playPauseBtn">▶ Play</button>
+            <button id="nextFrameBtn">Frame ▶</button>
+          </div>
+          <div class="row" style="align-items: stretch;">
+            <input id="frameSlider" type="range" min="0" max="0" value="0" step="1" />
+          </div>
+        </div>
+
+        <div id="modal-feedback">Bereit.</div>
+      </section>
+
+      <aside class="panel">
+        <h2 style="margin-top: 0;">Messung</h2>
+
+        <label class="checkbox-row">
+          <input type="checkbox" id="showHoverToggle" checked />
+          Live-Hover Temperatur
+        </label>
+
+        <div class="status-grid">
+          <div class="status-item">
+            <div class="label">Datei</div>
+            <div id="fileState" class="value">-</div>
+          </div>
+          <div class="status-item">
+            <div class="label">Auflösung</div>
+            <div id="resolutionState" class="value">-</div>
+          </div>
+          <div class="status-item">
+            <div class="label">Messpunkte</div>
+            <div id="pointsState" class="value">-</div>
+          </div>
+          <div class="status-item">
+            <div class="label">Temperaturbereich</div>
+            <div id="tempRangeState" class="value">-</div>
+          </div>
+          <div class="status-item">
+            <div class="label">Frame</div>
+            <div id="frameState" class="value">-</div>
+          </div>
+          <div class="status-item">
+            <div class="label">Hover</div>
+            <div id="hoverState" class="value">-</div>
+          </div>
+        </div>
+      </aside>
+    </div>
   </div>
 
   <script>
     let mediaData = { screenshots: [], videos: [] };
-    let currentTab = 'screenshots';
+    let currentTab = "screenshots";
 
-    async function loadFiles() {
-      try {
-        const res = await fetch("/api/files");
-        if (!res.ok) throw new Error("Fehler beim Laden");
-        mediaData = await res.json();
-        renderGallery();
-      } catch (e) {
-        document.getElementById("gallery").innerHTML = `<p style="grid-column: 1/-1; color: #ff4757;">Fehler beim Laden der Dateien.</p>`;
+    const modal = document.getElementById("modal");
+    const modalTitle = document.getElementById("modal-title");
+    const modalFeedback = document.getElementById("modal-feedback");
+    const mediaTypeState = document.getElementById("mediaTypeState");
+    const fileState = document.getElementById("fileState");
+    const resolutionState = document.getElementById("resolutionState");
+    const pointsState = document.getElementById("pointsState");
+    const tempRangeState = document.getElementById("tempRangeState");
+    const frameState = document.getElementById("frameState");
+    const hoverState = document.getElementById("hoverState");
+
+    const viewerWrap = document.getElementById("viewerWrap");
+    const modalImage = document.getElementById("modal-image");
+    const modalVideo = document.getElementById("modal-video");
+    const modalVideoSource = document.getElementById("modal-video-source");
+    const overlay = document.getElementById("modal-overlay");
+
+    const savePointsBtn = document.getElementById("savePointsBtn");
+    const saveFrameBtn = document.getElementById("saveFrameBtn");
+    const frameControls = document.getElementById("frameControls");
+    const frameSlider = document.getElementById("frameSlider");
+    const prevFrameBtn = document.getElementById("prevFrameBtn");
+    const nextFrameBtn = document.getElementById("nextFrameBtn");
+    const playPauseBtn = document.getElementById("playPauseBtn");
+    const showHoverToggle = document.getElementById("showHoverToggle");
+
+    let mediaState = {
+      isOpen: false,
+      type: null,
+      url: null,
+      name: null,
+      width: 0,
+      height: 0,
+      frameCount: 1,
+      currentFrame: 0,
+      points: [],
+      pointsWithTemp: [],
+      tempMin: null,
+      tempMax: null,
+      minPos: null,
+      maxPos: null
+    };
+
+    let hoverX = null;
+    let hoverY = null;
+    let hoverTemp = null;
+    let hoverTimer = null;
+
+    let dragIndex = -1;
+    let isDragging = false;
+    let clickStartX = 0;
+    let clickStartY = 0;
+
+    let videoAnimationId = null;
+    let lastRenderedVideoFrame = -1;
+
+    async function apiGet(url) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`GET ${url} failed: ${res.status}`);
+      return res.json();
+    }
+
+    async function apiPost(url, body = {}) {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`POST ${url} failed: ${res.status} ${text}`);
       }
+
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        return res.json();
+      }
+      return {};
+    }
+
+    function setFeedback(text, isError = false) {
+      modalFeedback.textContent = text;
+      modalFeedback.style.color = isError ? "#ff9aa5" : "#aab3c2";
     }
 
     function switchTab(tab) {
@@ -192,69 +477,640 @@
 
     function formatTime(timestamp) {
       const d = new Date(timestamp * 1000);
-      return d.toLocaleString("de-DE", { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+      return d.toLocaleString("de-DE", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+    }
+
+    async function loadFiles() {
+      try {
+        const res = await fetch("/api/files");
+        if (!res.ok) throw new Error("Fehler beim Laden");
+        mediaData = await res.json();
+        renderGallery();
+      } catch (e) {
+        document.getElementById("gallery").innerHTML =
+          `<p style="grid-column: 1/-1; color: #ff4757;">Fehler beim Laden der Dateien.</p>`;
+      }
     }
 
     function renderGallery() {
       const gallery = document.getElementById("gallery");
       const items = mediaData[currentTab];
-      
+
       if (!items || items.length === 0) {
-        gallery.innerHTML = `<p style="grid-column: 1/-1; color: var(--muted); text-align: center; margin-top: 40px;">Keine ${currentTab === 'screenshots' ? 'Bilder' : 'Videos'} gefunden.</p>`;
+        gallery.innerHTML =
+          `<p style="grid-column: 1/-1; color: var(--muted); text-align: center; margin-top: 40px;">
+            Keine ${currentTab === "screenshots" ? "Bilder" : "Videos"} gefunden.
+          </p>`;
         return;
       }
 
       gallery.innerHTML = items.map(item => {
-        if (currentTab === 'screenshots') {
+        const safeUrl = encodeURIComponent(item.url);
+        const safeName = item.name.replace(/'/g, "\\'");
+        if (currentTab === "screenshots") {
           return `
-            <div class="card" onclick="openModal('image', '${item.url}', '${item.name}')">
+            <div class="card" onclick="openModal('screenshot', decodeURIComponent('${safeUrl}'), '${safeName}')">
               <img src="${item.url}" loading="lazy" alt="${item.name}">
               <div class="card-title">${formatTime(item.time)}<br><small>${item.name}</small></div>
             </div>`;
-        } else {
-          return `
-            <div class="card" onclick="openModal('video', '${item.url}', '${item.name}')">
-              <div class="video-placeholder">▶️</div>
-              <div class="card-title">${formatTime(item.time)}<br><small>${item.name}</small></div>
-            </div>`;
         }
-      }).join('');
+
+        return `
+          <div class="card" onclick="openModal('video', decodeURIComponent('${safeUrl}'), '${safeName}')">
+            <div class="video-placeholder">▶️</div>
+            <div class="card-title">${formatTime(item.time)}<br><small>${item.name}</small></div>
+          </div>`;
+      }).join("");
     }
 
-    function openModal(type, url, title) {
-      const modal = document.getElementById("modal");
-      const body = document.getElementById("modal-body");
-      
-      if (type === 'image') {
-        body.innerHTML = `
-          <img id="modal-content" src="${url}" alt="${title}">
-          <div id="modal-title">${title}</div>
-        `;
-      } else if (type === 'video') {
-        body.innerHTML = `
-          <video id="modal-content" controls autoplay loop>
-            <source src="${url}" type="video/mp4">
-            <source src="${url}" type="video/x-matroska">
-            <source src="${url}" type="video/avi">
-            Dein Browser unterstützt dieses Videoformat leider nicht.
-          </video>
-          <div id="modal-title">${title}</div>
-        `;
-      }
+    function resetModalState() {
+      mediaState = {
+        isOpen: false,
+        type: null,
+        url: null,
+        name: null,
+        width: 0,
+        height: 0,
+        frameCount: 1,
+        currentFrame: 0,
+        points: [],
+        pointsWithTemp: [],
+        tempMin: null,
+        tempMax: null,
+        minPos: null,
+        maxPos: null
+      };
+
+      hoverX = null;
+      hoverY = null;
+      hoverTemp = null;
+      dragIndex = -1;
+      isDragging = false;
+      clickStartX = 0;
+      clickStartY = 0;
+      lastRenderedVideoFrame = -1;
+      cancelVideoOverlayLoop();
+
+      modalImage.style.display = "none";
+      modalVideo.style.display = "none";
+      modalVideo.pause();
+      modalVideo.removeAttribute("src");
+      modalVideo.load();
+
+      frameControls.style.display = "none";
+      saveFrameBtn.style.display = "none";
+      frameSlider.value = 0;
+      frameSlider.min = 0;
+      frameSlider.max = 0;
+
+      hoverState.textContent = "-";
+      pointsState.textContent = "-";
+      tempRangeState.textContent = "-";
+      frameState.textContent = "-";
+      resolutionState.textContent = "-";
+      fileState.textContent = "-";
+      mediaTypeState.textContent = "-";
+
+      clearOverlay();
+    }
+
+    async function openModal(type, url, title) {
+      resetModalState();
       modal.classList.add("open");
+
+      mediaState.isOpen = true;
+      mediaState.type = type;
+      mediaState.url = url;
+      mediaState.name = title;
+
+      modalTitle.textContent = title;
+      fileState.textContent = title;
+      mediaTypeState.textContent = type === "video" ? "Video" : "Screenshot";
+
+      try {
+        if (type === "screenshot") {
+          modalImage.src = url;
+          modalImage.style.display = "block";
+          await waitForMediaLoad(modalImage);
+        } else {
+          modalVideoSource.src = url;
+          modalVideo.load();
+          modalVideo.style.display = "block";
+          await waitForVideoMetadata(modalVideo);
+        }
+
+        await loadMediaInfo();
+        resizeOverlay();
+        drawOverlay();
+
+        if (type === "video") {
+          frameControls.style.display = "block";
+          saveFrameBtn.style.display = "inline-block";
+          frameSlider.min = 0;
+          frameSlider.max = Math.max(0, mediaState.frameCount - 1);
+          frameSlider.value = 0;
+          startVideoOverlayLoop();
+        }
+
+        setFeedback("Medium geladen.");
+      } catch (err) {
+        setFeedback(`Medium konnte nicht geladen werden: ${err.message}`, true);
+      }
     }
 
     function closeModal() {
-      document.getElementById("modal").classList.remove("open");
-      document.getElementById("modal-body").innerHTML = ""; // Stoppt Videos sofort
+      modal.classList.remove("open");
+      resetModalState();
     }
 
-    // Modal per Escape-Taste oder Klick auf Hintergrund schließen
+    function waitForMediaLoad(img) {
+      return new Promise((resolve, reject) => {
+        if (img.complete && img.naturalWidth > 0) {
+          resolve();
+          return;
+        }
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error("Bild konnte nicht geladen werden"));
+      });
+    }
+
+    function waitForVideoMetadata(video) {
+      return new Promise((resolve, reject) => {
+        if (video.readyState >= 1 && video.videoWidth > 0) {
+          resolve();
+          return;
+        }
+        video.onloadedmetadata = () => resolve();
+        video.onerror = () => reject(new Error("Video konnte nicht geladen werden"));
+      });
+    }
+
+    async function loadMediaInfo() {
+      const info = await apiGet(`/api/media/info?type=${encodeURIComponent(mediaState.type)}&url=${encodeURIComponent(mediaState.url)}`);
+
+      mediaState.width = info.width || 0;
+      mediaState.height = info.height || 0;
+      mediaState.frameCount = info.frame_count || 1;
+      mediaState.points = Array.isArray(info.points) ? info.points.map(p => ({ x: p[0], y: p[1] })) : [];
+      mediaState.pointsWithTemp = Array.isArray(info.points_with_temp) ? info.points_with_temp : [];
+      mediaState.tempMin = info.temp_min_c;
+      mediaState.tempMax = info.temp_max_c;
+      mediaState.minPos = info.min_pos || null;
+      mediaState.maxPos = info.max_pos || null;
+
+      resolutionState.textContent = `${mediaState.width} × ${mediaState.height}`;
+      pointsState.textContent = String(mediaState.points.length);
+      updateTempRangeState();
+      updateFrameState();
+    }
+
+    async function loadCurrentFrameData() {
+      if (!mediaState.isOpen) return;
+      const data = await apiGet(
+        `/api/media/frame-data?type=${encodeURIComponent(mediaState.type)}&url=${encodeURIComponent(mediaState.url)}&frame=${encodeURIComponent(mediaState.currentFrame)}`
+      );
+      mediaState.pointsWithTemp = Array.isArray(data.points_with_temp) ? data.points_with_temp : [];
+      mediaState.tempMin = data.temp_min_c;
+      mediaState.tempMax = data.temp_max_c;
+      mediaState.minPos = data.min_pos || null;
+      mediaState.maxPos = data.max_pos || null;
+      updateTempRangeState();
+      updateFrameState();
+      drawOverlay();
+    }
+
+    function updateTempRangeState() {
+      if (mediaState.tempMin === null || mediaState.tempMax === null) {
+        tempRangeState.textContent = "-";
+      } else {
+        tempRangeState.textContent = `${mediaState.tempMin.toFixed(1)} °C bis ${mediaState.tempMax.toFixed(1)} °C`;
+      }
+    }
+
+    function updateFrameState() {
+      if (mediaState.type === "video") {
+        frameState.textContent = `${mediaState.currentFrame + 1} / ${mediaState.frameCount}`;
+      } else {
+        frameState.textContent = "1 / 1";
+      }
+      pointsState.textContent = String(mediaState.points.length);
+    }
+
+    function getDisplayedElement() {
+      return mediaState.type === "video" ? modalVideo : modalImage;
+    }
+
+    function resizeOverlay() {
+      const el = getDisplayedElement();
+      if (!el || !mediaState.isOpen) return;
+
+      const rect = el.getBoundingClientRect();
+      overlay.width = Math.max(1, Math.round(rect.width));
+      overlay.height = Math.max(1, Math.round(rect.height));
+      overlay.style.width = `${Math.max(1, Math.round(rect.width))}px`;
+      overlay.style.height = `${Math.max(1, Math.round(rect.height))}px`;
+      drawOverlay();
+    }
+
+    function clearOverlay() {
+      const ctx = overlay.getContext("2d");
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+    }
+
+    function drawCrosshair(ctx, x, y, color) {
+      ctx.beginPath();
+      ctx.arc(x, y, 7, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(255,255,255,0.95)";
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(x - 12, y);
+      ctx.lineTo(x + 12, y);
+      ctx.moveTo(x, y - 12);
+      ctx.lineTo(x, y + 12);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(255,255,255,0.9)";
+      ctx.stroke();
+    }
+
+    function drawPointLabel(ctx, x, y, label, bgColor = "rgba(0,0,0,0.75)") {
+      ctx.font = "13px Arial";
+      const paddingX = 6;
+      const textWidth = ctx.measureText(label).width;
+      const boxWidth = textWidth + paddingX * 2;
+      const boxHeight = 22;
+
+      let boxX = x + 12;
+      let boxY = y - 30;
+
+      if (boxX + boxWidth > overlay.width) boxX = x - boxWidth - 12;
+      if (boxY < 0) boxY = y + 12;
+
+      ctx.fillStyle = bgColor;
+      ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+      ctx.strokeStyle = "rgba(255,255,255,0.35)";
+      ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+      ctx.fillStyle = "rgba(255,255,255,0.95)";
+      ctx.fillText(label, boxX + paddingX, boxY + 15);
+    }
+
+    function drawOverlay() {
+      clearOverlay();
+
+      if (!mediaState.width || !mediaState.height) return;
+      const ctx = overlay.getContext("2d");
+
+      const points = mediaState.pointsWithTemp.length > 0
+        ? mediaState.pointsWithTemp
+        : mediaState.points.map(p => ({ x: p.x, y: p.y, temp_c: null }));
+
+      for (let i = 0; i < points.length; i++) {
+        const point = points[i];
+        const x = (point.x / mediaState.width) * overlay.width;
+        const y = (point.y / mediaState.height) * overlay.height;
+
+        const color = (i === dragIndex) ? "rgba(255, 200, 80, 0.8)" : "rgba(255, 80, 80, 0.95)";
+        drawCrosshair(ctx, x, y, color);
+
+        ctx.font = "14px Arial";
+        ctx.fillStyle = "rgba(255,255,255,0.95)";
+        ctx.fillText(String(i + 1), x + 10, y - 10);
+
+        const tempText = point.temp_c === null ? `P${i + 1}: --.- °C` : `P${i + 1}: ${point.temp_c.toFixed(1)} °C`;
+        drawPointLabel(ctx, x, y, tempText);
+      }
+
+      if (showHoverToggle.checked && hoverX !== null && hoverY !== null && hoverTemp !== null) {
+        ctx.beginPath();
+        ctx.arc(hoverX, hoverY, 4, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255,255,255,0.8)";
+        ctx.fill();
+        drawPointLabel(ctx, hoverX, hoverY, `${hoverTemp.toFixed(1)} °C`, "rgba(80,80,80,0.95)");
+      }
+    }
+
+    function getMouseImageCoords(event) {
+      const rect = overlay.getBoundingClientRect();
+      const displayX = event.clientX - rect.left;
+      const displayY = event.clientY - rect.top;
+
+      const imageX = Math.round((displayX / rect.width) * mediaState.width);
+      const imageY = Math.round((displayY / rect.height) * mediaState.height);
+
+      return {
+        displayX,
+        displayY,
+        imageX: Math.max(0, Math.min(mediaState.width - 1, imageX)),
+        imageY: Math.max(0, Math.min(mediaState.height - 1, imageY))
+      };
+    }
+
+    async function requestHoverTemp(imageX, imageY) {
+      const res = await apiGet(
+        `/api/media/hover?type=${encodeURIComponent(mediaState.type)}&url=${encodeURIComponent(mediaState.url)}&frame=${encodeURIComponent(mediaState.currentFrame)}&x=${encodeURIComponent(imageX)}&y=${encodeURIComponent(imageY)}`
+      );
+      return res.temp_c;
+    }
+
+    async function savePoints() {
+      savePointsBtn.disabled = true;
+      savePointsBtn.classList.add("busy");
+      try {
+        const result = await apiPost("/api/media/points/save", {
+          type: mediaState.type,
+          url: mediaState.url
+        });
+        setFeedback(`Messpunkte gespeichert: ${result.saved || "OK"}`);
+      } catch (err) {
+        setFeedback(`Messpunkte konnten nicht gespeichert werden: ${err.message}`, true);
+      } finally {
+        savePointsBtn.disabled = false;
+        savePointsBtn.classList.remove("busy");
+      }
+    }
+
+    async function saveCurrentVideoFrame() {
+      if (mediaState.type !== "video") return;
+
+      saveFrameBtn.disabled = true;
+      saveFrameBtn.classList.add("busy");
+      try {
+        const result = await apiPost("/api/media/video-frame-screenshot", {
+          url: mediaState.url,
+          frame: mediaState.currentFrame
+        });
+        setFeedback(`Frame gespeichert: ${result.image_file || result.raw_file || "OK"}`);
+        await loadFiles();
+      } catch (err) {
+        setFeedback(`Frame konnte nicht gespeichert werden: ${err.message}`, true);
+      } finally {
+        saveFrameBtn.disabled = false;
+        saveFrameBtn.classList.remove("busy");
+      }
+    }
+
+    function getVideoFrameIndex() {
+      if (!modalVideo.duration || !isFinite(modalVideo.duration) || mediaState.frameCount <= 1) {
+        return 0;
+      }
+      const rawIndex = Math.round((modalVideo.currentTime / modalVideo.duration) * (mediaState.frameCount - 1));
+      return Math.max(0, Math.min(mediaState.frameCount - 1, rawIndex));
+    }
+
+    async function setVideoFrame(index) {
+      if (mediaState.type !== "video") return;
+      if (!modalVideo.duration || !isFinite(modalVideo.duration)) return;
+
+      index = Math.max(0, Math.min(mediaState.frameCount - 1, index));
+      const time = mediaState.frameCount > 1
+        ? (index / (mediaState.frameCount - 1)) * modalVideo.duration
+        : 0;
+
+      mediaState.currentFrame = index;
+      frameSlider.value = index;
+      modalVideo.currentTime = time;
+      await loadCurrentFrameData();
+    }
+
+    async function prevFrame() {
+      if (mediaState.type !== "video") return;
+      modalVideo.pause();
+      playPauseBtn.textContent = "▶ Play";
+      await setVideoFrame(mediaState.currentFrame - 1);
+    }
+
+    async function nextFrame() {
+      if (mediaState.type !== "video") return;
+      modalVideo.pause();
+      playPauseBtn.textContent = "▶ Play";
+      await setVideoFrame(mediaState.currentFrame + 1);
+    }
+
+    function togglePlayPause() {
+      if (mediaState.type !== "video") return;
+      if (modalVideo.paused) {
+        modalVideo.play();
+        playPauseBtn.textContent = "⏸ Pause";
+      } else {
+        modalVideo.pause();
+        playPauseBtn.textContent = "▶ Play";
+      }
+    }
+
+    function startVideoOverlayLoop() {
+      cancelVideoOverlayLoop();
+
+      const loop = async () => {
+        if (!mediaState.isOpen || mediaState.type !== "video") return;
+
+        const frameIndex = getVideoFrameIndex();
+        if (frameIndex !== lastRenderedVideoFrame) {
+          lastRenderedVideoFrame = frameIndex;
+          mediaState.currentFrame = frameIndex;
+          frameSlider.value = frameIndex;
+          try {
+            await loadCurrentFrameData();
+          } catch (_) {
+          }
+        }
+
+        videoAnimationId = requestAnimationFrame(loop);
+      };
+
+      videoAnimationId = requestAnimationFrame(loop);
+    }
+
+    function cancelVideoOverlayLoop() {
+      if (videoAnimationId !== null) {
+        cancelAnimationFrame(videoAnimationId);
+        videoAnimationId = null;
+      }
+    }
+
+    overlay.addEventListener("mousedown", (event) => {
+      if (!mediaState.width || !mediaState.height) return;
+
+      const { displayX, displayY } = getMouseImageCoords(event);
+      clickStartX = displayX;
+      clickStartY = displayY;
+      isDragging = false;
+      dragIndex = -1;
+
+      const points = mediaState.pointsWithTemp.length > 0
+        ? mediaState.pointsWithTemp
+        : mediaState.points;
+
+      for (let i = 0; i < points.length; i++) {
+        const px = (points[i].x / mediaState.width) * overlay.width;
+        const py = (points[i].y / mediaState.height) * overlay.height;
+        if (Math.hypot(px - displayX, py - displayY) < 15) {
+          dragIndex = i;
+          break;
+        }
+      }
+    });
+
+    overlay.addEventListener("mousemove", (event) => {
+      if (!mediaState.width || !mediaState.height) return;
+
+      const { imageX, imageY, displayX, displayY } = getMouseImageCoords(event);
+
+      if (dragIndex !== -1) {
+        if (!isDragging && Math.hypot(displayX - clickStartX, displayY - clickStartY) > 3) {
+          isDragging = true;
+        }
+
+        if (isDragging) {
+          if (mediaState.points[dragIndex]) {
+            mediaState.points[dragIndex].x = imageX;
+            mediaState.points[dragIndex].y = imageY;
+          }
+          if (mediaState.pointsWithTemp[dragIndex]) {
+            mediaState.pointsWithTemp[dragIndex].x = imageX;
+            mediaState.pointsWithTemp[dragIndex].y = imageY;
+          }
+          drawOverlay();
+        }
+        return;
+      }
+
+      if (!showHoverToggle.checked) return;
+
+      hoverX = displayX;
+      hoverY = displayY;
+
+      if (!hoverTimer) {
+        hoverTimer = setTimeout(async () => {
+          try {
+            hoverTemp = await requestHoverTemp(imageX, imageY);
+            hoverState.textContent = hoverTemp === null ? "-" : `${hoverTemp.toFixed(1)} °C`;
+            drawOverlay();
+          } catch (_) {
+          }
+          hoverTimer = null;
+        }, 66);
+      }
+    });
+
+    overlay.addEventListener("mouseup", async (event) => {
+      if (!mediaState.width || !mediaState.height) return;
+
+      const { imageX, imageY } = getMouseImageCoords(event);
+
+      try {
+        if (isDragging && dragIndex !== -1) {
+          const result = await apiPost("/api/media/points/move", {
+            type: mediaState.type,
+            url: mediaState.url,
+            frame: mediaState.currentFrame,
+            index: dragIndex,
+            x: imageX,
+            y: imageY
+          });
+
+          mediaState.points = Array.isArray(result.points)
+            ? result.points.map(p => ({ x: p[0], y: p[1] }))
+            : mediaState.points;
+          mediaState.pointsWithTemp = Array.isArray(result.points_with_temp)
+            ? result.points_with_temp
+            : mediaState.pointsWithTemp;
+
+          updateFrameState();
+          drawOverlay();
+        } else if (dragIndex === -1) {
+          const result = await apiPost("/api/media/points/toggle", {
+            type: mediaState.type,
+            url: mediaState.url,
+            frame: mediaState.currentFrame,
+            x: imageX,
+            y: imageY
+          });
+
+          mediaState.points = Array.isArray(result.points)
+            ? result.points.map(p => ({ x: p[0], y: p[1] }))
+            : mediaState.points;
+          mediaState.pointsWithTemp = Array.isArray(result.points_with_temp)
+            ? result.points_with_temp
+            : mediaState.pointsWithTemp;
+
+          updateFrameState();
+          drawOverlay();
+        }
+      } catch (err) {
+        setFeedback(`Messpunkt-Aktion fehlgeschlagen: ${err.message}`, true);
+      }
+
+      isDragging = false;
+      dragIndex = -1;
+    });
+
+    overlay.addEventListener("mouseleave", () => {
+      isDragging = false;
+      dragIndex = -1;
+      hoverX = null;
+      hoverY = null;
+      hoverTemp = null;
+      hoverState.textContent = "-";
+      drawOverlay();
+    });
+
+    showHoverToggle.addEventListener("change", () => {
+      if (!showHoverToggle.checked) {
+        hoverX = null;
+        hoverY = null;
+        hoverTemp = null;
+        hoverState.textContent = "-";
+        drawOverlay();
+      }
+    });
+
+    savePointsBtn.addEventListener("click", savePoints);
+    saveFrameBtn.addEventListener("click", saveCurrentVideoFrame);
+    prevFrameBtn.addEventListener("click", prevFrame);
+    nextFrameBtn.addEventListener("click", nextFrame);
+    playPauseBtn.addEventListener("click", togglePlayPause);
+
+    frameSlider.addEventListener("input", async () => {
+      if (mediaState.type !== "video") return;
+      modalVideo.pause();
+      playPauseBtn.textContent = "▶ Play";
+      await setVideoFrame(parseInt(frameSlider.value, 10) || 0);
+    });
+
+    modalVideo.addEventListener("play", () => {
+      playPauseBtn.textContent = "⏸ Pause";
+    });
+
+    modalVideo.addEventListener("pause", () => {
+      playPauseBtn.textContent = "▶ Play";
+    });
+
+    modalVideo.addEventListener("seeked", async () => {
+      if (mediaState.type !== "video") return;
+      mediaState.currentFrame = getVideoFrameIndex();
+      frameSlider.value = mediaState.currentFrame;
+      await loadCurrentFrameData();
+    });
+
+    modalImage.addEventListener("load", resizeOverlay);
+    modalVideo.addEventListener("loadedmetadata", resizeOverlay);
+    window.addEventListener("resize", resizeOverlay);
+
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") closeModal();
     });
-    document.getElementById("modal").addEventListener("click", (e) => {
-      if (e.target.id === "modal") closeModal(); // Nur schließen wenn man daneben klickt
+
+    modal.addEventListener("click", (e) => {
+      if (e.target.id === "modal") closeModal();
     });
 
     loadFiles();

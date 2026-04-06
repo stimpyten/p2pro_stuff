@@ -6,14 +6,17 @@ import mimetypes
 import os
 import time
 import traceback
+from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse, parse_qs
-import cv2
+from urllib.parse import urlparse, parse_qs, unquote
 
+import cv2
+import numpy as np
 from PIL import Image
 
+from P2Pro.services.media_service import MediaService
 from P2Pro.services.thermal_service import PALETTE_NAMES, ThermalService
 
 
@@ -21,10 +24,18 @@ BASE_DIR = Path(__file__).resolve().parent
 WEB_DIR = BASE_DIR / "web"
 
 thermal = ThermalService()
+media_service = MediaService(
+    screenshots_dir=thermal.screenshot_dir,
+    videos_dir=thermal.video_dir,
+)
+
+# Einfache In-Memory-Caches, damit Rohdaten/Videos nicht bei jedem Hover neu geladen werden
+_media_cache: dict[tuple[str, str], Any] = {}
 
 # Wichtige Video-Mimetypes für den Media Viewer
 mimetypes.add_type("video/mp4", ".mp4")
 mimetypes.add_type("video/x-matroska", ".mkv")
+mimetypes.add_type("video/x-msvideo", ".avi")
 
 
 def ensure_thermal_started() -> None:
@@ -37,11 +48,111 @@ def json_bytes(data: Any) -> bytes:
     return json.dumps(data, ensure_ascii=False).encode("utf-8")
 
 
+def thermal_to_celsius(raw_value: float) -> float:
+    return round((float(raw_value) / 64.0) - 273.15, 1)
+
+
+def get_temp_range_from_thermal(thermal_frame: np.ndarray) -> dict[str, Any]:
+    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(thermal_frame)
+    return {
+        "temp_min_c": thermal_to_celsius(min_val),
+        "temp_max_c": thermal_to_celsius(max_val),
+        "min_pos": [int(min_loc[0]), int(min_loc[1])],
+        "max_pos": [int(max_loc[0]), int(max_loc[1])],
+    }
+
+
+def get_point_temp_from_thermal(thermal_frame: np.ndarray, x: int, y: int) -> float | None:
+    if thermal_frame is None:
+        return None
+    h, w = thermal_frame.shape[:2]
+    x = max(0, min(int(x), w - 1))
+    y = max(0, min(int(y), h - 1))
+    return thermal_to_celsius(thermal_frame[y, x])
+
+
+def normalize_points(points: list[Any]) -> list[tuple[int, int]]:
+    out: list[tuple[int, int]] = []
+    for item in points:
+        if isinstance(item, (list, tuple)) and len(item) >= 2:
+            out.append((int(round(float(item[0]))), int(round(float(item[1])))))
+    return out
+
+
+def toggle_point(points: list[tuple[int, int]], x: int, y: int, threshold: int = 8) -> list[tuple[int, int]]:
+    new_points = list(points)
+    for idx, (px, py) in enumerate(new_points):
+        if abs(px - x) <= threshold and abs(py - y) <= threshold:
+            del new_points[idx]
+            return new_points
+    new_points.append((int(x), int(y)))
+    return new_points
+
+
+def move_point(points: list[tuple[int, int]], index: int, x: int, y: int) -> list[tuple[int, int]]:
+    new_points = list(points)
+    if 0 <= index < len(new_points):
+        new_points[index] = (int(x), int(y))
+    return new_points
+
+
+def points_with_temp(points: list[tuple[int, int]], thermal_frame: np.ndarray) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for x, y in points:
+        result.append(
+            {
+                "x": int(x),
+                "y": int(y),
+                "temp_c": get_point_temp_from_thermal(thermal_frame, x, y),
+            }
+        )
+    return result
+
+
+def resolve_media_url_to_path(url: str) -> Path:
+    parsed = urlparse(unquote(url))
+    parts = parsed.path.strip("/").split("/")
+
+    if ".." in parts:
+        raise ValueError("Ungültiger Pfad")
+
+    if len(parts) >= 3 and parts[0] == "media_files" and parts[1] == "screenshots":
+        return Path(thermal.screenshot_dir) / parts[2]
+
+    if len(parts) >= 4 and parts[0] == "media_files" and parts[1] == "videos":
+        return Path(thermal.video_dir) / parts[2] / parts[3]
+
+    raise ValueError("Unbekannte Media-URL")
+
+
+def get_cached_screenshot(image_file: str):
+    key = ("screenshot", image_file)
+    bundle = _media_cache.get(key)
+    if bundle is None:
+        bundle = media_service.load_screenshot(image_file)
+        _media_cache[key] = bundle
+    return bundle
+
+
+def get_cached_video(video_file: str):
+    key = ("video", video_file)
+    bundle = _media_cache.get(key)
+    if bundle is None:
+        bundle = media_service.load_video(video_file)
+        _media_cache[key] = bundle
+    return bundle
+
+
+def invalidate_media_cache_for_path(path_str: str) -> None:
+    _media_cache.pop(("screenshot", path_str), None)
+    _media_cache.pop(("video", path_str), None)
+
+
 class RequestHandler(BaseHTTPRequestHandler):
-    server_version = "P2ProWebAPI/1.3"
+    server_version = "P2ProWebAPI/1.4"
 
     def log_message(self, format: str, *args) -> None:
-        pass # Verhindert Konsolenspam beim Streaming
+        pass
 
     def _send_json(self, data: Any, status: int = 200) -> None:
         payload = json_bytes(data)
@@ -63,7 +174,6 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
     def _read_json_body(self) -> dict:
-        """Liest den Body aus, um die Leitung (Socket) für Keep-Alive sauber zu halten."""
         length = int(self.headers.get("Content-Length", "0"))
         if length <= 0:
             return {}
@@ -84,8 +194,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         content_type, _ = mimetypes.guess_type(str(path))
         if not content_type:
             content_type = "application/octet-stream"
-        
-        # Für Media Viewer essenziell (Videostreaming im Browser)
+
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(content)))
@@ -124,6 +233,12 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._handle_hover(parsed)
             elif parsed.path == "/api/files":
                 self._handle_files()
+            elif parsed.path == "/api/media/info":
+                self._handle_media_info(parsed)
+            elif parsed.path == "/api/media/frame-data":
+                self._handle_media_frame_data(parsed)
+            elif parsed.path == "/api/media/hover":
+                self._handle_media_hover(parsed)
             elif parsed.path.startswith("/media_files/"):
                 self._serve_media_file(parsed.path)
             else:
@@ -140,7 +255,6 @@ class RequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
 
         try:
-            # WICHTIGER FIX: Den Body IMMER auslesen, um den Socket sauber zu halten!
             req_data = self._read_json_body()
 
             if parsed.path == "/api/screenshot":
@@ -159,6 +273,14 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._handle_point(req_data)
             elif parsed.path == "/api/point/move":
                 self._handle_point_move(req_data)
+            elif parsed.path == "/api/media/points/toggle":
+                self._handle_media_points_toggle(req_data)
+            elif parsed.path == "/api/media/points/move":
+                self._handle_media_points_move(req_data)
+            elif parsed.path == "/api/media/points/save":
+                self._handle_media_points_save(req_data)
+            elif parsed.path == "/api/media/video-frame-screenshot":
+                self._handle_media_video_frame_screenshot(req_data)
             else:
                 self._send_json({"error": "Not Found"}, status=404)
         except Exception as exc:
@@ -270,7 +392,8 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _handle_palette(self, data: dict) -> None:
         ensure_thermal_started()
         palette = data.get("palette")
-        if palette: thermal.set_palette(str(palette))
+        if palette:
+            thermal.set_palette(str(palette))
         self._send_json({"palette": thermal.palette_name})
 
     def _handle_gain(self) -> None:
@@ -280,7 +403,8 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _handle_emissivity(self, data: dict) -> None:
         ensure_thermal_started()
         emissivity = data.get("emissivity")
-        if emissivity is not None: thermal.set_emissivity(float(emissivity))
+        if emissivity is not None:
+            thermal.set_emissivity(float(emissivity))
         self._send_json({"emissivity": float(emissivity) if emissivity is not None else 0})
 
     def _handle_point(self, data: dict) -> None:
@@ -300,17 +424,19 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _handle_files(self) -> None:
         ss_dir = Path(thermal.screenshot_dir)
         vid_dir = Path(thermal.video_dir)
-        
+
         files = {"screenshots": [], "videos": []}
-        
+
         if ss_dir.exists():
             for f in ss_dir.glob("*.png"):
-                files["screenshots"].append({
-                    "name": f.name,
-                    "url": f"/media_files/screenshots/{f.name}",
-                    "time": f.stat().st_mtime
-                })
-                
+                files["screenshots"].append(
+                    {
+                        "name": f.name,
+                        "url": f"/media_files/screenshots/{f.name}",
+                        "time": f.stat().st_mtime,
+                    }
+                )
+
         if vid_dir.exists():
             for d in vid_dir.glob("rec_*"):
                 if d.is_dir():
@@ -319,22 +445,259 @@ class RequestHandler(BaseHTTPRequestHandler):
                         vid_file = d / "video.mkv"
                     if not vid_file.exists():
                         vid_file = d / "video.avi"
-                        
+
                     if vid_file.exists():
-                        files["videos"].append({
-                            "name": d.name,
-                            "url": f"/media_files/videos/{d.name}/{vid_file.name}",
-                            "time": d.stat().st_mtime
-                        })
-                        
+                        files["videos"].append(
+                            {
+                                "name": d.name,
+                                "url": f"/media_files/videos/{d.name}/{vid_file.name}",
+                                "time": d.stat().st_mtime,
+                            }
+                        )
+
         files["screenshots"].sort(key=lambda x: x["time"], reverse=True)
         files["videos"].sort(key=lambda x: x["time"], reverse=True)
-        
+
         self._send_json(files)
+
+    def _handle_media_info(self, parsed) -> None:
+        qs = parse_qs(parsed.query)
+        media_type = qs.get("type", [""])[0]
+        media_url = qs.get("url", [""])[0]
+
+        if not media_type or not media_url:
+            self._send_json({"error": "type und url sind erforderlich"}, status=400)
+            return
+
+        path = str(resolve_media_url_to_path(media_url))
+
+        if media_type == "screenshot":
+            bundle = get_cached_screenshot(path)
+            info = get_temp_range_from_thermal(bundle.thermal)
+            self._send_json(
+                {
+                    "type": "screenshot",
+                    "url": media_url,
+                    "width": int(bundle.rgb_image.shape[1]),
+                    "height": int(bundle.rgb_image.shape[0]),
+                    "frame_count": 1,
+                    "points": [[int(x), int(y)] for x, y in bundle.measure_points],
+                    "points_with_temp": points_with_temp(bundle.measure_points, bundle.thermal),
+                    **info,
+                }
+            )
+            return
+
+        if media_type == "video":
+            bundle = get_cached_video(path)
+            frame_index = 0
+            thermal_frame = bundle.thermal_frames[frame_index]
+            info = get_temp_range_from_thermal(thermal_frame)
+            self._send_json(
+                {
+                    "type": "video",
+                    "url": media_url,
+                    "width": int(bundle.rgb_frames[0].shape[1]) if bundle.rgb_frames else None,
+                    "height": int(bundle.rgb_frames[0].shape[0]) if bundle.rgb_frames else None,
+                    "frame_count": int(len(bundle.rgb_frames)),
+                    "points": [[int(x), int(y)] for x, y in bundle.measure_points],
+                    "points_with_temp": points_with_temp(bundle.measure_points, thermal_frame),
+                    **info,
+                }
+            )
+            return
+
+        self._send_json({"error": "Unbekannter type"}, status=400)
+
+    def _handle_media_frame_data(self, parsed) -> None:
+        qs = parse_qs(parsed.query)
+        media_type = qs.get("type", [""])[0]
+        media_url = qs.get("url", [""])[0]
+        frame_index = int(qs.get("frame", ["0"])[0])
+
+        if not media_type or not media_url:
+            self._send_json({"error": "type und url sind erforderlich"}, status=400)
+            return
+
+        path = str(resolve_media_url_to_path(media_url))
+
+        if media_type == "screenshot":
+            bundle = get_cached_screenshot(path)
+            info = get_temp_range_from_thermal(bundle.thermal)
+            self._send_json(
+                {
+                    "frame": 0,
+                    "points_with_temp": points_with_temp(bundle.measure_points, bundle.thermal),
+                    **info,
+                }
+            )
+            return
+
+        if media_type == "video":
+            bundle = get_cached_video(path)
+            if not bundle.rgb_frames or bundle.thermal_frames.size == 0:
+                self._send_json({"error": "Keine Frames vorhanden"}, status=404)
+                return
+
+            frame_index = max(0, min(frame_index, len(bundle.rgb_frames) - 1))
+            thermal_frame = bundle.thermal_frames[frame_index]
+            info = get_temp_range_from_thermal(thermal_frame)
+            self._send_json(
+                {
+                    "frame": frame_index,
+                    "points_with_temp": points_with_temp(bundle.measure_points, thermal_frame),
+                    **info,
+                }
+            )
+            return
+
+        self._send_json({"error": "Unbekannter type"}, status=400)
+
+    def _handle_media_hover(self, parsed) -> None:
+        qs = parse_qs(parsed.query)
+        media_type = qs.get("type", [""])[0]
+        media_url = qs.get("url", [""])[0]
+        x = int(qs.get("x", ["0"])[0])
+        y = int(qs.get("y", ["0"])[0])
+        frame_index = int(qs.get("frame", ["0"])[0])
+
+        if not media_type or not media_url:
+            self._send_json({"error": "type und url sind erforderlich"}, status=400)
+            return
+
+        path = str(resolve_media_url_to_path(media_url))
+
+        if media_type == "screenshot":
+            bundle = get_cached_screenshot(path)
+            self._send_json({"temp_c": get_point_temp_from_thermal(bundle.thermal, x, y)})
+            return
+
+        if media_type == "video":
+            bundle = get_cached_video(path)
+            if not bundle.rgb_frames or bundle.thermal_frames.size == 0:
+                self._send_json({"error": "Keine Frames vorhanden"}, status=404)
+                return
+            frame_index = max(0, min(frame_index, len(bundle.rgb_frames) - 1))
+            thermal_frame = bundle.thermal_frames[frame_index]
+            self._send_json({"temp_c": get_point_temp_from_thermal(thermal_frame, x, y)})
+            return
+
+        self._send_json({"error": "Unbekannter type"}, status=400)
+
+    def _handle_media_points_toggle(self, data: dict) -> None:
+        media_type = str(data.get("type", ""))
+        media_url = str(data.get("url", ""))
+        x = int(round(float(data.get("x", 0))))
+        y = int(round(float(data.get("y", 0))))
+        frame_index = int(round(float(data.get("frame", 0))))
+
+        path = str(resolve_media_url_to_path(media_url))
+
+        if media_type == "screenshot":
+            bundle = get_cached_screenshot(path)
+            bundle.measure_points = toggle_point(bundle.measure_points, x, y)
+            self._send_json(
+                {
+                    "points": [[int(px), int(py)] for px, py in bundle.measure_points],
+                    "points_with_temp": points_with_temp(bundle.measure_points, bundle.thermal),
+                }
+            )
+            return
+
+        if media_type == "video":
+            bundle = get_cached_video(path)
+            bundle.measure_points = toggle_point(bundle.measure_points, x, y)
+            frame_index = max(0, min(frame_index, len(bundle.rgb_frames) - 1))
+            thermal_frame = bundle.thermal_frames[frame_index]
+            self._send_json(
+                {
+                    "points": [[int(px), int(py)] for px, py in bundle.measure_points],
+                    "points_with_temp": points_with_temp(bundle.measure_points, thermal_frame),
+                }
+            )
+            return
+
+        self._send_json({"error": "Unbekannter type"}, status=400)
+
+    def _handle_media_points_move(self, data: dict) -> None:
+        media_type = str(data.get("type", ""))
+        media_url = str(data.get("url", ""))
+        index = int(round(float(data.get("index", -1))))
+        x = int(round(float(data.get("x", 0))))
+        y = int(round(float(data.get("y", 0))))
+        frame_index = int(round(float(data.get("frame", 0))))
+
+        path = str(resolve_media_url_to_path(media_url))
+
+        if media_type == "screenshot":
+            bundle = get_cached_screenshot(path)
+            bundle.measure_points = move_point(bundle.measure_points, index, x, y)
+            self._send_json(
+                {
+                    "points": [[int(px), int(py)] for px, py in bundle.measure_points],
+                    "points_with_temp": points_with_temp(bundle.measure_points, bundle.thermal),
+                }
+            )
+            return
+
+        if media_type == "video":
+            bundle = get_cached_video(path)
+            bundle.measure_points = move_point(bundle.measure_points, index, x, y)
+            frame_index = max(0, min(frame_index, len(bundle.rgb_frames) - 1))
+            thermal_frame = bundle.thermal_frames[frame_index]
+            self._send_json(
+                {
+                    "points": [[int(px), int(py)] for px, py in bundle.measure_points],
+                    "points_with_temp": points_with_temp(bundle.measure_points, thermal_frame),
+                }
+            )
+            return
+
+        self._send_json({"error": "Unbekannter type"}, status=400)
+
+    def _handle_media_points_save(self, data: dict) -> None:
+        media_type = str(data.get("type", ""))
+        media_url = str(data.get("url", ""))
+        path = str(resolve_media_url_to_path(media_url))
+
+        if media_type == "screenshot":
+            bundle = get_cached_screenshot(path)
+            points_file = media_service.save_screenshot_measure_points(path, bundle.measure_points)
+            self._send_json({"saved": points_file, "points": [[int(x), int(y)] for x, y in bundle.measure_points]})
+            return
+
+        if media_type == "video":
+            bundle = get_cached_video(path)
+            points_file = media_service.save_video_measure_points(path, bundle.measure_points)
+            self._send_json({"saved": points_file, "points": [[int(x), int(y)] for x, y in bundle.measure_points]})
+            return
+
+        self._send_json({"error": "Unbekannter type"}, status=400)
+
+    def _handle_media_video_frame_screenshot(self, data: dict) -> None:
+        media_url = str(data.get("url", ""))
+        frame_index = int(round(float(data.get("frame", 0))))
+        path = str(resolve_media_url_to_path(media_url))
+
+        bundle = get_cached_video(path)
+        if not bundle.rgb_frames or bundle.thermal_frames.size == 0:
+            self._send_json({"error": "Keine Frames vorhanden"}, status=404)
+            return
+
+        frame_index = max(0, min(frame_index, len(bundle.rgb_frames) - 1))
+        result = media_service.save_video_frame_as_screenshot(
+            video_file=path,
+            frame_index=frame_index,
+            rgb_frame=bundle.rgb_frames[frame_index],
+            thermal_frame=bundle.thermal_frames[frame_index],
+            measure_points=bundle.measure_points,
+        )
+        invalidate_media_cache_for_path(path)
+        self._send_json(result)
 
     def _serve_media_file(self, path_str: str) -> None:
         parts = path_str.strip("/").split("/")
-        
+
         if len(parts) >= 3 and parts[1] == "screenshots":
             file_path = Path(thermal.screenshot_dir) / parts[2]
         elif len(parts) >= 4 and parts[1] == "videos":
