@@ -59,16 +59,15 @@
       pointer-events: auto;
       cursor: crosshair;
     }
-    
-    /* Legende (Colorbar) Container */
+
     #colorbarContainer {
       position: absolute;
       right: 12px;
       top: 12px;
       bottom: 12px;
       width: 60px;
-      pointer-events: none; /* Klicks gehen hindurch */
-      display: none; /* Standardmäßig aus */
+      pointer-events: none;
+      display: none;
       flex-direction: column;
       justify-content: space-between;
       align-items: flex-end;
@@ -159,7 +158,7 @@
     .busy {
       outline: 1px solid var(--accent);
     }
-    
+
     .checkbox-row {
       display: flex;
       align-items: center;
@@ -196,11 +195,10 @@
 
       <div class="stream-wrap" id="streamWrap">
         <img id="liveImage" class="stream" src="/api/stream" alt="Livebild" draggable="false" />
-        
-        <!-- NEU: Legende (Colorbar) -->
+
         <div id="colorbarContainer">
           <span class="colorbar-label" id="colorbarMax">MAX</span>
-          <img id="colorbarImg" src="" />
+          <img id="colorbarImg" src="" alt="Farbskala" />
           <span class="colorbar-label" id="colorbarMin">MIN</span>
         </div>
 
@@ -287,11 +285,17 @@
     const tempRangeState = document.getElementById("tempRangeState");
     const paletteSelect = document.getElementById("paletteSelect");
     const emissivityInput = document.getElementById("emissivityInput");
-    
+
     const showMinMaxToggle = document.getElementById("showMinMaxToggle");
     const showColorbarToggle = document.getElementById("showColorbarToggle");
     const showHoverToggle = document.getElementById("showHoverToggle");
-    
+
+    const reconnectBtn = document.getElementById("reconnectBtn");
+    const screenshotBtn = document.getElementById("screenshotBtn");
+    const recordStartBtn = document.getElementById("recordStartBtn");
+    const recordStopBtn = document.getElementById("recordStopBtn");
+    const gainBtn = document.getElementById("gainBtn");
+
     const feedback = document.getElementById("feedback");
 
     let emissivityTimer = null;
@@ -299,8 +303,7 @@
 
     let frameWidth = 0;
     let frameHeight = 0;
-    
-    // Daten für Points & MinMax
+
     let currentPoints = [];
     let minPos = null;
     let maxPos = null;
@@ -308,13 +311,11 @@
     let globalMaxTemp = null;
     let lastPaletteName = null;
 
-    // Drag & Drop
     let dragIndex = -1;
     let isDragging = false;
     let clickStartX = 0;
     let clickStartY = 0;
 
-    // Hover
     let hoverX = null;
     let hoverY = null;
     let hoverTemp = null;
@@ -332,11 +333,18 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
       });
+
       if (!res.ok) {
         const text = await res.text();
         throw new Error(`POST ${url} failed: ${res.status} ${text}`);
       }
-      return res.json();
+
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        return res.json();
+      }
+
+      return {};
     }
 
     function setFeedback(text, isError = false) {
@@ -400,20 +408,18 @@
 
       if (!frameWidth || !frameHeight) return;
 
-      // 1. Min/Max zeichnen
       if (showMinMaxToggle.checked && minPos && maxPos && globalMinTemp !== null && globalMaxTemp !== null) {
         const mx = (minPos[0] / frameWidth) * overlay.width;
         const my = (minPos[1] / frameHeight) * overlay.height;
-        drawCrosshair(ctx, mx, my, "rgba(30, 144, 255, 0.8)"); // Blue
+        drawCrosshair(ctx, mx, my, "rgba(30, 144, 255, 0.8)");
         drawPointLabel(ctx, mx, my, `MIN: ${globalMinTemp.toFixed(1)} °C`, "rgba(0, 50, 150, 0.8)");
 
         const hx = (maxPos[0] / frameWidth) * overlay.width;
         const hy = (maxPos[1] / frameHeight) * overlay.height;
-        drawCrosshair(ctx, hx, hy, "rgba(255, 71, 87, 0.8)"); // Red
+        drawCrosshair(ctx, hx, hy, "rgba(255, 71, 87, 0.8)");
         drawPointLabel(ctx, hx, hy, `MAX: ${globalMaxTemp.toFixed(1)} °C`, "rgba(150, 0, 0, 0.8)");
       }
 
-      // 2. Feste Messpunkte zeichnen
       for (let i = 0; i < currentPoints.length; i++) {
         const point = currentPoints[i];
         const x = (point.x / frameWidth) * overlay.width;
@@ -430,7 +436,6 @@
         drawPointLabel(ctx, x, y, tempText);
       }
 
-      // 3. Live-Hover zeichnen (immer on top)
       if (showHoverToggle.checked && hoverX !== null && hoverY !== null && hoverTemp !== null) {
         ctx.beginPath();
         ctx.arc(hoverX, hoverY, 4, 0, Math.PI * 2);
@@ -441,7 +446,7 @@
     }
 
     async function loadStatus() {
-      if (isDragging) return; // UI update pausieren während Drag
+      if (isDragging) return;
 
       try {
         const data = await apiGet("/api/status");
@@ -450,6 +455,7 @@
         gainState.textContent = `Gain: ${data.gain}`;
         paletteState.textContent = `Palette: ${data.palette}`;
         frameState.textContent = String(data.last_frame_num);
+        cameraState.textContent = data.camera_connected ?? "Unbekannt";
 
         if (typeof data.frame_width === "number") frameWidth = data.frame_width;
         if (typeof data.frame_height === "number") frameHeight = data.frame_height;
@@ -466,15 +472,15 @@
 
         if (globalMinTemp !== null && globalMaxTemp !== null) {
           tempRangeState.textContent = `${globalMinTemp} °C bis ${globalMaxTemp} °C`;
+        } else {
+          tempRangeState.textContent = "-";
         }
 
-        // Colorbar UI Logik
         if (showColorbarToggle.checked) {
           colorbarContainer.style.display = "flex";
           if (globalMaxTemp !== null) colorbarMax.textContent = globalMaxTemp.toFixed(1) + " °C";
           if (globalMinTemp !== null) colorbarMin.textContent = globalMinTemp.toFixed(1) + " °C";
-          
-          // Bild nur neu laden, wenn sich die Palette geändert hat
+
           if (data.palette !== lastPaletteName) {
             colorbarImg.src = `/api/colorbar?palette=${encodeURIComponent(data.palette)}&t=${Date.now()}`;
             lastPaletteName = data.palette;
@@ -483,7 +489,6 @@
           colorbarContainer.style.display = "none";
         }
 
-        // Palette Select befüllen
         if (Array.isArray(data.available_palettes) && paletteSelect.options.length === 0) {
           suppressPaletteChange = true;
           for (const palette of data.available_palettes) {
@@ -494,6 +499,7 @@
           }
           suppressPaletteChange = false;
         }
+
         if (paletteSelect.value !== data.palette) {
           suppressPaletteChange = true;
           paletteSelect.value = data.palette;
@@ -503,11 +509,10 @@
         drawPoints();
       } catch (err) {
         connState.textContent = "Fehler";
+        cameraState.textContent = "Nicht erreichbar";
       }
     }
 
-    /* --- EVENTS --- */
-    
     function getMouseImageCoords(event) {
       const rect = overlay.getBoundingClientRect();
       const displayX = event.clientX - rect.left;
@@ -520,8 +525,10 @@
     overlay.addEventListener("mousedown", (event) => {
       if (!frameWidth) return;
       const { displayX, displayY } = getMouseImageCoords(event);
-      clickStartX = displayX; clickStartY = displayY;
-      isDragging = false; dragIndex = -1;
+      clickStartX = displayX;
+      clickStartY = displayY;
+      isDragging = false;
+      dragIndex = -1;
 
       for (let i = 0; i < currentPoints.length; i++) {
         const px = (currentPoints[i].x / frameWidth) * overlay.width;
@@ -536,29 +543,29 @@
     overlay.addEventListener("mousemove", (event) => {
       if (!frameWidth) return;
       const { imageX, imageY, displayX, displayY } = getMouseImageCoords(event);
-      
-      // Drag & Drop Logik
+
       if (dragIndex !== -1) {
-        if (!isDragging && Math.hypot(displayX - clickStartX, displayY - clickStartY) > 3) isDragging = true;
+        if (!isDragging && Math.hypot(displayX - clickStartX, displayY - clickStartY) > 3) {
+          isDragging = true;
+        }
+
         if (isDragging) {
           currentPoints[dragIndex].x = imageX;
           currentPoints[dragIndex].y = imageY;
           drawPoints();
         }
-      } 
-      // Hover Logik
-      else if (showHoverToggle.checked) {
+      } else if (showHoverToggle.checked) {
         hoverX = displayX;
         hoverY = displayY;
-        
-        // Throttling für API-Calls (ca 15 fps)
+
         if (!hoverTimer) {
           hoverTimer = setTimeout(async () => {
             try {
               const res = await apiGet(`/api/hover?x=${imageX}&y=${imageY}`);
               hoverTemp = res.temp_c;
               drawPoints();
-            } catch (e) {}
+            } catch (e) {
+            }
             hoverTimer = null;
           }, 66);
         }
@@ -574,31 +581,41 @@
           const result = await apiPost("/api/point/move", { index: dragIndex, x: imageX, y: imageY });
           currentPoints = result.points_with_temp;
           drawPoints();
-        } catch (err) {}
+        } catch (err) {
+          setFeedback(`Punkt konnte nicht verschoben werden: ${err.message}`, true);
+        }
       } else if (dragIndex === -1) {
-        // Normaler Klick
         try {
           const result = await apiPost("/api/point", { x: imageX, y: imageY });
           currentPoints = result.points_with_temp;
           drawPoints();
-        } catch (err) {}
+        } catch (err) {
+          setFeedback(`Punkt konnte nicht gesetzt werden: ${err.message}`, true);
+        }
       }
-      isDragging = false; dragIndex = -1;
+
+      isDragging = false;
+      dragIndex = -1;
     });
 
     overlay.addEventListener("mouseleave", () => {
-      isDragging = false; dragIndex = -1;
-      hoverX = null; hoverY = null; hoverTemp = null;
+      isDragging = false;
+      dragIndex = -1;
+      hoverX = null;
+      hoverY = null;
+      hoverTemp = null;
       drawPoints();
     });
-    
+
     showMinMaxToggle.addEventListener("change", drawPoints);
     showColorbarToggle.addEventListener("change", loadStatus);
     showHoverToggle.addEventListener("change", () => {
-        if(!showHoverToggle.checked) {
-            hoverX = null; hoverY = null; hoverTemp = null;
-            drawPoints();
-        }
+      if (!showHoverToggle.checked) {
+        hoverX = null;
+        hoverY = null;
+        hoverTemp = null;
+        drawPoints();
+      }
     });
 
     async function applyPalette() {
@@ -606,7 +623,10 @@
       paletteSelect.classList.add("busy");
       try {
         await apiPost("/api/palette", { palette: paletteSelect.value });
+        setFeedback(`Palette gesetzt: ${paletteSelect.value}`);
         await loadStatus();
+      } catch (err) {
+        setFeedback(`Palette konnte nicht gesetzt werden: ${err.message}`, true);
       } finally {
         paletteSelect.classList.remove("busy");
       }
@@ -615,12 +635,86 @@
     async function applyEmissivity() {
       let value = parseFloat(emissivityInput.value);
       if (Number.isNaN(value)) return;
+
+      value = Math.max(0.01, Math.min(1.00, value));
       emissivityInput.classList.add("busy");
+
       try {
-        await apiPost("/api/emissivity", { emissivity: Math.max(0.01, Math.min(1.00, value)) });
+        await apiPost("/api/emissivity", { emissivity: value });
+        setFeedback(`Emissivität gesetzt: ${value.toFixed(2)}`);
         await loadStatus();
+      } catch (err) {
+        setFeedback(`Emissivität konnte nicht gesetzt werden: ${err.message}`, true);
       } finally {
         emissivityInput.classList.remove("busy");
+      }
+    }
+
+    async function takeScreenshot() {
+      screenshotBtn.classList.add("busy");
+      screenshotBtn.disabled = true;
+
+      try {
+        const result = await apiPost("/api/screenshot");
+        const info = result.path || result.filename || result.message || "Screenshot gespeichert.";
+        setFeedback(`Screenshot: ${info}`);
+        await loadStatus();
+      } catch (err) {
+        setFeedback(`Screenshot fehlgeschlagen: ${err.message}`, true);
+      } finally {
+        screenshotBtn.classList.remove("busy");
+        screenshotBtn.disabled = false;
+      }
+    }
+
+    async function startRecording() {
+      recordStartBtn.classList.add("busy");
+      recordStartBtn.disabled = true;
+
+      try {
+        const result = await apiPost("/api/record/start");
+        const info = result.message || "Recording gestartet.";
+        setFeedback(info);
+        await loadStatus();
+      } catch (err) {
+        setFeedback(`Recording Start fehlgeschlagen: ${err.message}`, true);
+      } finally {
+        recordStartBtn.classList.remove("busy");
+        recordStartBtn.disabled = false;
+      }
+    }
+
+    async function stopRecording() {
+      recordStopBtn.classList.add("busy");
+      recordStopBtn.disabled = true;
+
+      try {
+        const result = await apiPost("/api/record/stop");
+        const info = result.path || result.filename || result.message || "Recording gestoppt.";
+        setFeedback(`Recording Stop: ${info}`);
+        await loadStatus();
+      } catch (err) {
+        setFeedback(`Recording Stop fehlgeschlagen: ${err.message}`, true);
+      } finally {
+        recordStopBtn.classList.remove("busy");
+        recordStopBtn.disabled = false;
+      }
+    }
+
+    async function toggleGain() {
+      gainBtn.classList.add("busy");
+      gainBtn.disabled = true;
+
+      try {
+        const result = await apiPost("/api/gain");
+        const info = result.gain || result.message || "Gain umgeschaltet.";
+        setFeedback(`Gain: ${info}`);
+        await loadStatus();
+      } catch (err) {
+        setFeedback(`Gain konnte nicht umgeschaltet werden: ${err.message}`, true);
+      } finally {
+        gainBtn.classList.remove("busy");
+        gainBtn.disabled = false;
       }
     }
 
@@ -630,7 +724,12 @@
       emissivityTimer = setTimeout(applyEmissivity, 450);
     });
 
-    document.getElementById("reconnectBtn").addEventListener("click", reconnectStream);
+    reconnectBtn.addEventListener("click", reconnectStream);
+    screenshotBtn.addEventListener("click", takeScreenshot);
+    recordStartBtn.addEventListener("click", startRecording);
+    recordStopBtn.addEventListener("click", stopRecording);
+    gainBtn.addEventListener("click", toggleGain);
+
     liveImage.addEventListener("load", resizeOverlay);
     window.addEventListener("resize", resizeOverlay);
 
