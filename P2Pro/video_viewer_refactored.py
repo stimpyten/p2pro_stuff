@@ -1,29 +1,32 @@
-# video_viewer.py
-
 import os
-import numpy as np
-import cv2
-import json
-from kivy.uix.screenmanager import Screen
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.image import Image
-from kivy.uix.button import Button
-from kivy.uix.label import Label
-from kivy.uix.filechooser import FileChooserIconView
-from kivy.uix.widget import Widget
-from kivy.graphics.texture import Texture
-from kivy.clock import Clock
+from typing import Tuple
 
-def draw_text_with_outline(img, text, org, font, font_scale, color_fg, color_outline=(0,0,0), thickness_fg=1, thickness_outline=3):
+import cv2
+import numpy as np
+from kivy.clock import Clock
+from kivy.graphics.texture import Texture
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.button import Button
+from kivy.uix.filechooser import FileChooserIconView
+from kivy.uix.image import Image
+from kivy.uix.label import Label
+from kivy.uix.screenmanager import Screen
+
+from P2Pro.services.media_service import MediaService
+
+
+def draw_text_with_outline(img, text, org, font, font_scale, color_fg, color_outline=(0, 0, 0), thickness_fg=1, thickness_outline=3):
     cv2.putText(img, text, org, font, font_scale, color_outline, thickness_outline, cv2.LINE_AA)
     cv2.putText(img, text, org, font, font_scale, color_fg, thickness_fg, cv2.LINE_AA)
 
-def draw_cross_with_outline(img, pos, color_fg=(255,255,255), color_outline=(0,0,0), size=6, thickness_fg=1, thickness_outline=3):
+
+def draw_cross_with_outline(img, pos, color_fg=(255, 255, 255), color_outline=(0, 0, 0), size=6, thickness_fg=1, thickness_outline=3):
     x, y = pos
-    cv2.line(img, (x-size, y), (x+size, y), color_outline, thickness_outline, cv2.LINE_AA)
-    cv2.line(img, (x, y-size), (x, y+size), color_outline, thickness_outline, cv2.LINE_AA)
-    cv2.line(img, (x-size, y), (x+size, y), color_fg, thickness_fg, cv2.LINE_AA)
-    cv2.line(img, (x, y-size), (x, y+size), color_fg, thickness_fg, cv2.LINE_AA)
+    cv2.line(img, (x - size, y), (x + size, y), color_outline, thickness_outline, cv2.LINE_AA)
+    cv2.line(img, (x, y - size), (x, y + size), color_outline, thickness_outline, cv2.LINE_AA)
+    cv2.line(img, (x - size, y), (x + size, y), color_fg, thickness_fg, cv2.LINE_AA)
+    cv2.line(img, (x, y - size), (x, y + size), color_fg, thickness_fg, cv2.LINE_AA)
+
 
 class ClickableImage(Image):
     def __init__(self, **kwargs):
@@ -35,9 +38,11 @@ class ClickableImage(Image):
             return super().on_touch_down(touch)
         if self.texture is None:
             return super().on_touch_down(touch)
+
         w_tex, h_tex = self.texture.size
         w_widget, h_widget = self.size
         x_widget, y_widget = self.pos
+
         aspect_tex = w_tex / h_tex
         aspect_widget = w_widget / h_widget
         if aspect_tex > aspect_widget:
@@ -52,36 +57,40 @@ class ClickableImage(Image):
             disp_h = h_widget
             offset_x = x_widget + (w_widget - disp_w) / 2
             offset_y = y_widget
+
         if not (offset_x <= touch.x <= offset_x + disp_w and offset_y <= touch.y <= offset_y + disp_h):
             return super().on_touch_down(touch)
+
         x_rel = (touch.x - offset_x) / disp_w
         y_rel = (touch.y - offset_y) / disp_h
-        x_img = int(np.clip(x_rel * w_tex, 0, w_tex-1))
-        y_img = int(np.clip((1 - y_rel) * h_tex, 0, h_tex-1))
+        x_img = int(np.clip(x_rel * w_tex, 0, w_tex - 1))
+        y_img = int(np.clip((1 - y_rel) * h_tex, 0, h_tex - 1))
+
         if self.click_callback:
-            self.click_callback((x_img, y_img), button=touch.button)
+            self.click_callback((x_img, y_img), button=getattr(touch, "button", "left"))
         return super().on_touch_down(touch)
 
+
 class VideoViewerScreen(Screen):
-    def __init__(self, **kwargs):
+    def __init__(self, screenshots_dir: str = "./screenshots", videos_dir: str = "./videos", **kwargs):
         super().__init__(**kwargs)
+        self.media_service = MediaService(screenshots_dir=screenshots_dir, videos_dir=videos_dir)
         self.last_vidfile = None
-        self.last_rawfile = None
-        self.last_pointsfile = None
         self.rgb_frames = []
-        self.thermal_frames = []
+        self.thermal_frames = np.array([])
         self.measure_points = []
         self.current_frame_idx = 0
         self.is_playing = False
+        self._clock_ev = None
 
-        layout = BoxLayout(orientation='horizontal', padding=10, spacing=10)
-        leftbar = BoxLayout(orientation='vertical', size_hint=(None, 1), width=300, spacing=8)
+        layout = BoxLayout(orientation="horizontal", padding=10, spacing=10)
+        leftbar = BoxLayout(orientation="vertical", size_hint=(None, 1), width=300, spacing=8)
 
         backbtn = Button(text="< Menu", size_hint=(1, None), height=40)
-        backbtn.bind(on_press=lambda *a: setattr(self.manager, 'current', 'menu'))
+        backbtn.bind(on_press=lambda *a: setattr(self.manager, "current", "menu"))
         leftbar.add_widget(backbtn)
 
-        self.filechooser = FileChooserIconView(filters=['*.mkv'], path='./videos')
+        self.filechooser = FileChooserIconView(filters=["*.mkv"], path=videos_dir)
         self.filechooser.bind(on_selection=self.on_file_selected)
         leftbar.add_widget(self.filechooser)
 
@@ -89,11 +98,14 @@ class VideoViewerScreen(Screen):
         btn_load.bind(on_press=self.on_file_open_button)
         leftbar.add_widget(btn_load)
 
-        # Videosteuerung mit ASCII-Text
-        btn_box = BoxLayout(orientation='horizontal', size_hint=(1, None), height=40)
-        self.btn_prev = Button(text="<", size_hint=(.3, 1))   # Frame zurück
-        self.btn_playpause = Button(text="|>", size_hint=(.4, 1))   # Play/Pause (|> oder ||)
-        self.btn_next = Button(text=">", size_hint=(.3, 1))   # Frame vor
+        btn_refresh = Button(text="Liste aktualisieren", size_hint=(1, None), height=40)
+        btn_refresh.bind(on_press=self.refresh_filechooser)
+        leftbar.add_widget(btn_refresh)
+
+        btn_box = BoxLayout(orientation="horizontal", size_hint=(1, None), height=40)
+        self.btn_prev = Button(text="<", size_hint=(0.3, 1))
+        self.btn_playpause = Button(text="|>", size_hint=(0.4, 1))
+        self.btn_next = Button(text=">", size_hint=(0.3, 1))
         self.btn_prev.bind(on_press=self.prev_frame)
         self.btn_playpause.bind(on_press=self.toggle_playpause)
         self.btn_next.bind(on_press=self.next_frame)
@@ -110,7 +122,7 @@ class VideoViewerScreen(Screen):
         btn_save.bind(on_press=self.save_measure_points)
         leftbar.add_widget(btn_save)
 
-        self.info_label = Label(text="Bitte Video auswählen", size_hint=(1, None), height=60)
+        self.info_label = Label(text="Bitte Video auswählen", size_hint=(1, None), height=90)
         leftbar.add_widget(self.info_label)
 
         layout.add_widget(leftbar)
@@ -121,7 +133,16 @@ class VideoViewerScreen(Screen):
 
         self.add_widget(layout)
 
-        self._clock_ev = None
+    def on_pre_enter(self, *args):
+        self.refresh_filechooser()
+
+    def on_leave(self, *args):
+        self.stop_playback()
+
+    def refresh_filechooser(self, *args):
+        os.makedirs(self.media_service.videos_dir, exist_ok=True)
+        self.filechooser.path = self.media_service.videos_dir
+        self.filechooser._update_files()
 
     def on_file_selected(self, filechooser, selection):
         if selection:
@@ -132,49 +153,36 @@ class VideoViewerScreen(Screen):
         if sel:
             self.load_video_file(sel[0])
 
-    def load_video_file(self, vid_file):
-        self.last_vidfile = vid_file
-        video_dir = os.path.dirname(vid_file)
-        raw_file = os.path.join(video_dir, "rawframes.npy")
-        points_file = os.path.join(video_dir, "measure_points.json")
-
-        if not os.path.exists(raw_file):
-            self.info_label.text = "Fehler: Rohdaten (.npy) nicht gefunden!"
+    def load_video_file(self, vid_file: str):
+        self.stop_playback()
+        try:
+            bundle = self.media_service.load_video(vid_file)
+        except Exception as exc:
+            self.last_vidfile = None
             self.rgb_frames = []
-            self.thermal_frames = []
+            self.thermal_frames = np.array([])
+            self.measure_points = []
+            self.current_frame_idx = 0
             self.image.texture = None
+            self.info_label.text = f"Fehler beim Laden:\n{exc}"
             return
-        self.last_rawfile = raw_file
-        self.last_pointsfile = points_file if os.path.exists(points_file) else None
 
-        cap = cv2.VideoCapture(vid_file)
-        self.rgb_frames = []
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            self.rgb_frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        cap.release()
-        self.thermal_frames = np.load(raw_file)
-        if len(self.thermal_frames.shape) == 2:
-            self.thermal_frames = self.thermal_frames[None, ...]
+        self.last_vidfile = bundle.video_file
+        self.rgb_frames = bundle.rgb_frames
+        self.thermal_frames = bundle.thermal_frames
+        self.measure_points = list(bundle.measure_points)
         self.current_frame_idx = 0
-        self.measure_points = []
-        if self.last_pointsfile:
-            try:
-                with open(self.last_pointsfile, "r") as f:
-                    data = json.load(f)
-                    self.measure_points = [tuple(pt) for pt in data.get("measure_points", [])]
-            except Exception as e:
-                print(f"WARN: Punkte nicht geladen: {e}")
-
+        self.btn_playpause.text = "|>"
         self.update_image()
-        self.info_label.text = f"{os.path.basename(vid_file)}\nFrames: {len(self.rgb_frames)} | Messpunkte: {len(self.measure_points)}"
-        self.btn_playpause.text = "|>"  # Play-Symbol beim Laden
+        self.info_label.text = (
+            f"{os.path.basename(vid_file)}\n"
+            f"Frames: {len(self.rgb_frames)} | Messpunkte: {len(self.measure_points)}"
+        )
 
-    def on_image_click(self, pos, button='left'):
-        if not self.rgb_frames or not self.thermal_frames.any():
+    def on_image_click(self, pos: Tuple[int, int], button="left"):
+        if not self.rgb_frames or self.thermal_frames.size == 0:
             return
+
         x, y = pos
         threshold = 8
         for idx, (mx, my) in enumerate(self.measure_points):
@@ -182,43 +190,39 @@ class VideoViewerScreen(Screen):
                 del self.measure_points[idx]
                 self.update_image()
                 return
-        self.measure_points.append((x, y))
+
+        self.measure_points.append((int(x), int(y)))
         self.update_image()
 
     def update_image(self):
         if not self.rgb_frames:
             self.image.texture = None
             return
+
         idx = self.current_frame_idx
         disp_img = self.rgb_frames[idx].copy()
         thermal = self.thermal_frames[idx]
-        for pt in self.measure_points:
-            x, y = pt
+
+        for x, y in self.measure_points:
             if 0 <= x < disp_img.shape[1] and 0 <= y < disp_img.shape[0]:
                 temp_val = thermal[y, x]
                 temp_c = round((temp_val / 64.0) - 273.16, 1)
-                draw_cross_with_outline(
-                    disp_img, (x, y),
-                    color_fg=(255,255,255), color_outline=(0,0,0),
-                    size=6, thickness_fg=1, thickness_outline=3
-                )
+                draw_cross_with_outline(disp_img, (x, y))
                 draw_text_with_outline(
                     disp_img,
                     f"{temp_c:.1f}",
                     (x + 10, y + 4),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.35,
-                    (255,255,255),
-                    color_outline=(0,0,0),
-                    thickness_fg=1,
-                    thickness_outline=3
+                    (255, 255, 255),
                 )
+
         h, w, _ = disp_img.shape
-        texture = Texture.create(size=(w, h), colorfmt='rgb')
-        texture.blit_buffer(disp_img.tobytes(), colorfmt='rgb')
+        texture = Texture.create(size=(w, h), colorfmt="rgb")
+        texture.blit_buffer(disp_img.tobytes(), colorfmt="rgb")
         texture.flip_vertical()
         self.image.texture = texture
-        self.info_label.text = f"Frame {self.current_frame_idx+1}/{len(self.rgb_frames)} | Messpunkte: {len(self.measure_points)}"
+        self.info_label.text = f"Frame {self.current_frame_idx + 1}/{len(self.rgb_frames)} | Messpunkte: {len(self.measure_points)}"
 
     def prev_frame(self, *args):
         if not self.rgb_frames:
@@ -229,18 +233,17 @@ class VideoViewerScreen(Screen):
     def next_frame(self, *args):
         if not self.rgb_frames:
             return
-        self.current_frame_idx = min(len(self.rgb_frames)-1, self.current_frame_idx + 1)
+        self.current_frame_idx = min(len(self.rgb_frames) - 1, self.current_frame_idx + 1)
         self.update_image()
 
     def toggle_playpause(self, *args):
-        # Umschalten zwischen Play und Pause
         if self.is_playing:
             self.stop_playback()
         else:
             self.start_playback()
 
     def start_playback(self, *args):
-        if self._clock_ev is not None:
+        if self._clock_ev is not None or not self.rgb_frames:
             return
         self.is_playing = True
         self.btn_playpause.text = "||"
@@ -248,51 +251,46 @@ class VideoViewerScreen(Screen):
 
     def _playback_step(self, dt):
         if not self.rgb_frames:
+            self.stop_playback()
             return False
         self.current_frame_idx += 1
         if self.current_frame_idx >= len(self.rgb_frames):
-            self.current_frame_idx = 0  # Loop
+            self.current_frame_idx = 0
         self.update_image()
         return self.is_playing
 
     def stop_playback(self, *args):
         self.is_playing = False
         self.btn_playpause.text = "|>"
-        if self._clock_ev:
+        if self._clock_ev is not None:
             self._clock_ev.cancel()
             self._clock_ev = None
 
     def save_screenshot_from_video(self, *args):
-        if not self.rgb_frames or not self.thermal_frames.any():
+        if not self.rgb_frames or self.thermal_frames.size == 0 or not self.last_vidfile:
             self.info_label.text = "Kein Frame geladen!"
             return
+
         idx = self.current_frame_idx
-        rgb_img = self.rgb_frames[idx]
-        thermal = self.thermal_frames[idx]
-        ts = f"{os.path.splitext(os.path.basename(self.last_vidfile))[0]}_{idx:06d}"
-        base = os.path.join('screenshots', f"video_frame_{ts}")
-        img_file = base + ".png"
-        thermal_file = base + "_raw.npy"
-        points_file = base + "_points.json"
-        if not os.path.exists('screenshots'):
-            os.makedirs('screenshots', exist_ok=True)
-        cv2.imwrite(img_file, cv2.cvtColor(rgb_img, cv2.COLOR_RGB2BGR))
-        np.save(thermal_file, thermal)
-        data = {"measure_points": [ [int(x), int(y)] for (x, y) in self.measure_points ]}
-        with open(points_file, "w") as f:
-            json.dump(data, f, indent=2)
-        self.info_label.text = f"Screenshot gespeichert: {os.path.basename(img_file)}"
+        try:
+            result = self.media_service.save_video_frame_as_screenshot(
+                video_file=self.last_vidfile,
+                frame_index=idx,
+                rgb_frame=self.rgb_frames[idx],
+                thermal_frame=self.thermal_frames[idx],
+                measure_points=self.measure_points,
+            )
+            self.info_label.text = f"Screenshot gespeichert:\n{os.path.basename(result['image_file'])}"
+        except Exception as exc:
+            self.info_label.text = f"Fehler beim Speichern:\n{exc}"
 
     def save_measure_points(self, *args):
         if not self.last_vidfile:
             self.info_label.text = "Kein Video ausgewählt."
             return
-        video_dir = os.path.dirname(self.last_vidfile)
-        points_file = os.path.join(video_dir, "measure_points.json")
-        data = {"measure_points": [ [int(x), int(y)] for (x, y) in self.measure_points ]}
+
         try:
-            with open(points_file, "w") as f:
-                json.dump(data, f, indent=2)
+            points_file = self.media_service.save_video_measure_points(self.last_vidfile, self.measure_points)
             self.info_label.text = f"Messpunkte gespeichert in:\n{os.path.basename(points_file)}"
-        except Exception as e:
-            self.info_label.text = f"Fehler beim Speichern:\n{e}"
+        except Exception as exc:
+            self.info_label.text = f"Fehler beim Speichern:\n{exc}"
