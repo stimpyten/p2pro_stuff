@@ -1,89 +1,171 @@
-# InfiRay P2 Pro Viewer
+# 🔥 P2Pro Web Thermal Viewer
 
-:warning: **[WIP]**  
-See [below](#roadmap) for a roadmap.
+![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)
+![Platform](https://img.shields.io/badge/Platform-Raspberry%20Pi-green)
+![Status](https://img.shields.io/badge/Status-Active-success)
+![License](https://img.shields.io/badge/License-See%20Upstream-lightgrey)
+![UI](https://img.shields.io/badge/UI-Web%20App-orange)
+![Stream](https://img.shields.io/badge/Stream-MJPEG-blueviolet)
 
-This project aims to be an open-source image viewer and API for the InfiRay P2 Pro thermal camera module.
+A modern **web-based interface** for the **InfiRay P2 Pro thermal camera**, running on a Raspberry Pi.
 
-The communication protocol was reverse-engineered, to avoid needing to include the proprietary precompiled InfiRay libraries.
+Control your camera, view the live thermal stream, set measurement points, and record data — all directly from your browser.
 
-**Disclaimer**: This is my first big Python multi-module project. So there are bound to be horrific architectural decisions and many other beginner's mistakes. Please excuse that.  
-The premise is to get to the first milestone with as little premature optimization as possible, otherwise I would never arrive there.
+---
 
-## Notices
-### Windows
-For sending vendor control transfers to the UVC camera in addition to opening the camera as a normal UVC camera, libusb needs to be installed as an upper filter driver.  
-This can be installed relatively easily using Zadig.  
-- Options > List all devices
-- Select "USB Camera (Interface 0)"
-- Scroll to "libusb-win32" and select "Install filter driver" from the dropdown besides "Replace driver"
+## 🚀 Features
 
-Also, the camera video stream needs to be opened first before using the script to send commands to it, otherwise the call to libusb will just hang for whatever reason.
+### 🎥 Live Viewer
 
-### Linux
-Still needs to be tested, but should work™
+* Low-latency MJPEG stream
+* Real-time thermal visualization
+* Smooth browser-based rendering
 
-## Where to buy
-The cheapest vendor in Germany appears to be [Peargear](https://www.pergear.de/products/infiray-p2-pro?ref=067mg).  
-Pergear also has [an international shop](https://www.pergear.com/products/infiray-p2-pro?ref=067mg) for other countries, but I'm not sure if they're the cheapest there.
+### 🎛️ Camera Control
 
-## Additional Resources
-- [Review and teardown video by mikeselectricstuff](https://www.youtube.com/watch?v=YMQeXq1ujn0)
-- [Extensive review thread by Fraser](https://www.eevblog.com/forum/thermal-imaging/review-infiray-p2-pro-thermal-camera-dongle-for-android-mobile-phones/)
-- [General discussion thread with some interesting resources](https://www.eevblog.com/forum/thermal-imaging/infiray-and-their-p2-pro-discussion/)
+* Palette switching (instant)
+* Gain toggle
+* Emissivity adjustment (live)
+* No page reload required
 
+### 📍 Measurement Points
 
-## Roadmap
-- [ ] USB Vendor Commands
-    - [x] Read/Write commands
-        - [x] "standard" cmd
-        - [x] "long" cmd
-        - [x] wait for camera ready
-    - [x] Pseudo color 
-    - [ ] NUC shutter control (auto/manual/trigger)
-    - [ ] High/low temperature range
-    - [ ] Other parameters (emissivity, distance, etc)
-    - [ ] Switch to actual raw sensor readings?
-    - [ ] Recalibrate lens?
-    - [ ] Remaining (less relevant) commands
-- [ ] Recording
-    - [ ] Still image
-        - [ ] JPEG and radiometry data in one file
-            - [ ] Standardized format? R-JPEG?
-        - [ ] Metadata (rotation, camera settings, location?, etc)
-    - [ ] Video
-        - [x] MKV file with radiometry data as second lossless video track
-        - [x] Audio
-        - [ ] Metadata
-        - [ ] Rotation (on-the-fly possible? :D)
-        - [ ] Render overlays into video (scale, min/max/center temps, etc)
-        - [ ] Timelapse?
-        - [ ] Min/Max/Center temperature in subtitles? :D
-        - [ ] Standardized video format? (don't know any)
-    - [ ] Find / build tool to analyze recordings later (or export to other formats)
-    - [ ] Virtual webcam output with temperature scale overlays?
-- [ ] GUI
-    - [ ] Display video stream
-    - [ ] Overlays
-        - [ ] Temperature scale
-        - [ ] Min/max/center temperature
-        - [ ] Cursor hover temperature
-    - [ ] Palette selection
-    - [ ] Shutter control
-    - [ ] Gain selection (camera temperature range)
-    - [ ] Parameters (emissivity, distance, etc)
-    - [ ] Recording controls (take picture, start/stop video, recording indicator and time)
-    - [ ] Image rotation / flip
-    - [ ] Manually set min/max range (probably need to apply own pseudo color from raw temperature data)
-    - [ ] Own analysis controls (points, lines, rectangles, etc)
-    - [ ] Log measurements to CSV
-    - [ ] Plot measurements
-    - [ ] ...
-- [ ] Documentation
-    - [ ] How to use
-    - [ ] USB vendor command protocol
-    - [ ] My video format (if I don't find a more standardized one)
-    - [ ] P2Pro Android app JPEG file format, that has radiometry data embedded
-- Very long-term plans:
-    - Small device with a socket for the P2 Pro to convert it into a hand-held device
-    - Android App
+* Click to set/remove points
+* Real-time temperature display
+* Multiple points supported
+* Overlay rendered in browser
+
+### 📸 Recording
+
+* Screenshot capture (PNG + raw data)
+* Video recording (MKV + raw frames)
+* Measurement points saved with recordings
+
+---
+
+## 🖥️ Architecture
+
+```text
+Raspberry Pi + P2Pro Camera
+        │
+        ▼
+ ThermalService (Python backend)
+        │
+        ▼
+ Web API (Threaded HTTP Server)
+        │
+        ▼
+ Browser (Live Web UI)
+```
+
+---
+
+## ⚡ Getting Started
+
+### 1. Activate environment
+
+```bash
+cd ~/P2Pro-Viewer
+source venv/bin/activate
+```
+
+### 2. Start server
+
+```bash
+python3 -m P2Pro.services.web_api
+```
+
+### 3. Open browser
+
+```text
+http://<raspberry-pi-ip>:8080/
+```
+
+---
+
+## 📂 Project Structure
+
+```text
+P2Pro/
+ ├── services/
+ │   ├── thermal_service.py   # Camera logic & processing
+ │   ├── web_api.py           # API + web server
+ │   └── web/
+ │       ├── index.html       # Entry page
+ │       └── live.html        # Live viewer UI
+ ├── video.py                 # Frame capture
+ └── P2Pro_cmd.py             # Low-level camera control
+```
+
+---
+
+## ⚙️ Requirements
+
+* Raspberry Pi 4 (recommended)
+* Python 3.11+
+* InfiRay P2 Pro camera
+* OpenCV
+* NumPy
+* PIL
+
+---
+
+## ⚠️ Important Notes
+
+* Only **one application** can access the camera at a time
+* Do **not** run `gui_neu.py` and the web app simultaneously
+* For best performance:
+
+  * Use direct USB connection
+  * Ensure stable power supply
+
+---
+
+## 🙏 Credits
+
+This project is built on top of the excellent work by
+👉 LeoDJ
+
+Original project:
+
+🔗 https://github.com/LeoDJ/P2Pro-Viewer
+
+Without this foundation, this project would not be possible.
+
+### Upstream provides:
+
+* Core camera communication
+* Access to raw thermal data
+* Base rendering pipeline
+
+### This project adds:
+
+* Web-based UI
+* Remote control via browser
+* Improved UX
+* Measurement overlays
+* Recording enhancements
+
+---
+
+## 🧠 Roadmap
+
+* [ ] Media Viewer (images & videos)
+* [ ] Advanced measurement tools
+* [ ] Temperature graphs
+* [ ] GUI remote control (mirror logic)
+* [ ] UI improvements & touch support
+
+---
+
+## 🤝 Contributing
+
+Contributions, ideas and improvements are welcome.
+
+---
+
+## 📜 License
+
+Please refer to the upstream project license:
+
+🔗 https://github.com/LeoDJ/P2Pro-Viewer
