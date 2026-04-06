@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>P2Pro Webapp</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #181c23;
+      --panel2: #222833;
+      --text: #e9edf3;
+      --muted: #aab3c2;
+      --border: #2d3440;
+      --accent: #3f8cff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Arial, sans-serif;
+    }
+    .card {
+      width: min(720px, calc(100vw - 32px));
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 24px;
+    }
+    h1 { margin-top: 0; }
+    p { color: var(--muted); line-height: 1.5; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 20px;
+    }
+    a.box {
+      display: block;
+      text-decoration: none;
+      color: var(--text);
+      background: var(--panel2);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px;
+      min-height: 120px;
+    }
+    a.box:hover {
+      border-color: var(--accent);
+    }
+    .title {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .hint {
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 18px;
+    }
+    @media (max-width: 700px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>P2Pro Webapp</h1>
+    <p>
+      Die Weboberfläche ist jetzt in getrennte Bereiche aufgeteilt.
+      Wir konzentrieren uns zuerst auf den Live-Viewer, damit Stream und Steuerung sauber laufen.
+    </p>
+
+    <div class="grid">
+      <a class="box" href="/live">
+        <div class="title">Live Viewer</div>
+        <div>Livebild, Palette, Gain, Emissivität, Screenshot und Recording.</div>
+      </a>
+
+      <a class="box" href="/media">
+        <div class="title">Media Viewer</div>
+        <div>Noch nicht aktiv. Kommt als nächster separater Schritt.</div>
+      </a>
+    </div>
+
+    <div class="hint">
+      Wichtig: Nur diese Webapp oder die lokale GUI gleichzeitig mit der Kamera nutzen.
+    </div>
+  </main>
+</body>
+</html>

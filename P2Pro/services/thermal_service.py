@@ -50,8 +50,8 @@ class FrameSnapshot:
 
 class ThermalService:
     def __init__(self, screenshot_dir: str = "screenshots", video_dir: str = "videos"):
-        self.screenshot_dir = screenshot_dir
-        self.video_dir = video_dir
+        self.screenshot_dir = os.path.abspath(screenshot_dir)
+        self.video_dir = os.path.abspath(video_dir)
 
         self.video = Video()
         self.p2pro: Optional[P2Pro] = None
@@ -61,9 +61,11 @@ class ThermalService:
         self.palette_name = "White Hot"
         self.gain_state = 0
         self.measure_points: List[Tuple[int, int]] = []
+
         self.last_rgb: Optional[np.ndarray] = None
         self.last_thermal: Optional[np.ndarray] = None
         self.last_frame_num = -1
+        self.latest_snapshot: Optional[FrameSnapshot] = None
 
         self.is_recording = False
         self.recording_dir: Optional[str] = None
@@ -160,53 +162,101 @@ class ThermalService:
         with self._lock:
             return list(self.measure_points)
 
-    def get_latest_frame(self, queue_index: int = 1) -> Optional[FrameSnapshot]:
-        frame_data = None
-        queue_obj = self.video.frame_queue[queue_index]
-        while not queue_obj.empty():
-            frame_data = queue_obj.get()
-
-        if not isinstance(frame_data, dict):
-            return None
-
+    def _make_snapshot(self, frame_data: dict) -> Optional[FrameSnapshot]:
         thermal = frame_data.get("thermal_data")
         rgb_picture = frame_data.get("rgb_data")
         frame_num = int(frame_data.get("frame_num", -1))
+
         if thermal is None or rgb_picture is None:
             return None
 
         temp_min_val = round((float(np.min(thermal)) / 64.0) - 273.16, 1)
         temp_max_val = round((float(np.max(thermal)) / 64.0) - 273.16, 1)
 
-        with self._lock:
-            self.last_frame_num = frame_num
-            self.last_rgb = rgb_picture.copy()
-            self.last_thermal = thermal.copy()
-            if self.is_recording:
-                self._record_frame(rgb_picture, thermal)
-
-        return FrameSnapshot(
+        snapshot = FrameSnapshot(
             frame_num=frame_num,
-            rgb_data=rgb_picture,
-            thermal_data=thermal,
+            rgb_data=np.array(rgb_picture, copy=True),
+            thermal_data=np.array(thermal, copy=True),
             temp_min_c=temp_min_val,
             temp_max_c=temp_max_val,
         )
 
-    def save_screenshot(self) -> Optional[str]:
         with self._lock:
-            if self.last_rgb is None or self.last_thermal is None:
-                return None
+            self.last_frame_num = snapshot.frame_num
+            self.last_rgb = snapshot.rgb_data.copy()
+            self.last_thermal = snapshot.thermal_data.copy()
+            self.latest_snapshot = FrameSnapshot(
+                frame_num=snapshot.frame_num,
+                rgb_data=snapshot.rgb_data.copy(),
+                thermal_data=snapshot.thermal_data.copy(),
+                temp_min_c=snapshot.temp_min_c,
+                temp_max_c=snapshot.temp_max_c,
+            )
+            if self.is_recording:
+                self._record_frame(snapshot.rgb_data, snapshot.thermal_data)
 
-            ts = time.strftime("%Y%m%d_%H%M%S")
-            os.makedirs(self.screenshot_dir, exist_ok=True)
-            base = os.path.join(self.screenshot_dir, f"screenshot_{ts}")
-            cv2.imwrite(f"{base}.png", cv2.cvtColor(self.last_rgb, cv2.COLOR_RGB2BGR))
-            np.save(f"{base}_raw.npy", self.last_thermal)
-            data = {"measure_points": [[int(x), int(y)] for (x, y) in self.measure_points]}
-            with open(f"{base}_points.json", "w", encoding="utf-8") as handle:
-                json.dump(data, handle, indent=2)
-            return f"{base}.png"
+        return snapshot
+
+    def get_latest_frame(self, queue_index: int = 1) -> Optional[FrameSnapshot]:
+        frame_data = None
+        queue_obj = self.video.frame_queue[queue_index]
+
+        while not queue_obj.empty():
+            frame_data = queue_obj.get()
+
+        if isinstance(frame_data, dict):
+            snapshot = self._make_snapshot(frame_data)
+            if snapshot is not None:
+                return snapshot
+
+        with self._lock:
+            if self.latest_snapshot is None:
+                return None
+            return FrameSnapshot(
+                frame_num=self.latest_snapshot.frame_num,
+                rgb_data=self.latest_snapshot.rgb_data.copy(),
+                thermal_data=self.latest_snapshot.thermal_data.copy(),
+                temp_min_c=self.latest_snapshot.temp_min_c,
+                temp_max_c=self.latest_snapshot.temp_max_c,
+            )
+
+    def wait_for_frame(self, timeout: float = 1.0, poll_interval: float = 0.02) -> Optional[FrameSnapshot]:
+        end_time = time.time() + timeout
+        snapshot = self.get_latest_frame()
+        if snapshot is not None:
+            return snapshot
+
+        while time.time() < end_time:
+            snapshot = self.get_latest_frame()
+            if snapshot is not None:
+                return snapshot
+            time.sleep(poll_interval)
+        return None
+
+    def save_screenshot(self, timeout: float = 1.0) -> Optional[str]:
+        snapshot = self.wait_for_frame(timeout=timeout)
+        if snapshot is None:
+            return None
+
+        with self._lock:
+            rgb = self.last_rgb.copy() if self.last_rgb is not None else snapshot.rgb_data.copy()
+            thermal = self.last_thermal.copy() if self.last_thermal is not None else snapshot.thermal_data.copy()
+            points = [[int(x), int(y)] for (x, y) in self.measure_points]
+
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        os.makedirs(self.screenshot_dir, exist_ok=True)
+        base = os.path.join(self.screenshot_dir, f"screenshot_{ts}")
+
+        ok = cv2.imwrite(f"{base}.png", cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
+        if not ok:
+            return None
+
+        np.save(f"{base}_raw.npy", thermal)
+        data = {"measure_points": points}
+        with open(f"{base}_points.json", "w", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=2)
+
+        return f"{base}.png"
 
     def start_recording(self) -> Optional[str]:
         with self._lock:

@@ -2,25 +2,26 @@ from __future__ import annotations
 
 import io
 import json
+import mimetypes
+import time
 import traceback
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import urlparse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from PIL import Image
 
-from P2Pro.services.thermal_service import ThermalService, PALETTE_NAMES
-from P2Pro.services.media_service import MediaService
+from P2Pro.services.thermal_service import PALETTE_NAMES, ThermalService
 
+
+BASE_DIR = Path(__file__).resolve().parent
+WEB_DIR = BASE_DIR / "web"
 
 thermal = ThermalService()
-media = MediaService()
 
 
 def ensure_thermal_started() -> None:
-    """
-    Initialisiert Kamera + Videothread genau einmal.
-    """
     if not thermal.camera_initialized:
         thermal.initialize(palette_name="White Hot", gain_mode="Low")
     thermal.start_video()
@@ -31,10 +32,9 @@ def json_bytes(data: Any) -> bytes:
 
 
 class RequestHandler(BaseHTTPRequestHandler):
-    server_version = "P2ProWebAPI/0.2"
+    server_version = "P2ProWebAPI/0.6"
 
     def log_message(self, format: str, *args) -> None:
-        # Etwas kompaktere Logs
         print(f"[HTTP] {self.address_string()} - {format % args}")
 
     def _send_json(self, data: Any, status: int = 200) -> None:
@@ -42,6 +42,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Cache-Control", "no-cache")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
@@ -52,6 +53,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Cache-Control", "no-cache")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
@@ -67,6 +69,17 @@ class RequestHandler(BaseHTTPRequestHandler):
             return {}
         return json.loads(raw.decode("utf-8"))
 
+    def _serve_file(self, path: Path) -> None:
+        if not path.exists() or not path.is_file():
+            self._send_json({"error": "Not Found"}, status=404)
+            return
+
+        content = path.read_bytes()
+        content_type, _ = mimetypes.guess_type(str(path))
+        if not content_type:
+            content_type = "application/octet-stream"
+        self._send_bytes(content, content_type)
+
     def do_OPTIONS(self) -> None:
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -78,27 +91,27 @@ class RequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
 
         try:
-            if parsed.path == "/api/status":
+            if parsed.path in ("/", "/index.html"):
+                self._serve_file(WEB_DIR / "index.html")
+            elif parsed.path == "/live":
+                self._serve_file(WEB_DIR / "live.html")
+            elif parsed.path == "/api/status":
                 self._handle_status()
             elif parsed.path == "/api/frame":
                 self._handle_frame()
-            elif parsed.path == "/api/screenshots":
-                self._handle_screenshots()
-            elif parsed.path == "/api/videos":
-                self._handle_videos()
+            elif parsed.path == "/api/stream":
+                self._handle_stream()
             elif parsed.path == "/api/palettes":
                 self._handle_palettes()
             else:
                 self._send_json({"error": "Not Found"}, status=404)
+        except BrokenPipeError:
+            pass
+        except ConnectionResetError:
+            pass
         except Exception as exc:
             traceback.print_exc()
-            self._send_json(
-                {
-                    "error": "internal_server_error",
-                    "detail": str(exc),
-                },
-                status=500,
-            )
+            self._send_json({"error": "internal_server_error", "detail": str(exc)}, status=500)
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
@@ -120,21 +133,10 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "Not Found"}, status=404)
         except Exception as exc:
             traceback.print_exc()
-            self._send_json(
-                {
-                    "error": "internal_server_error",
-                    "detail": str(exc),
-                },
-                status=500,
-            )
-
-    # -----------------------------
-    # GET-Handler
-    # -----------------------------
+            self._send_json({"error": "internal_server_error", "detail": str(exc)}, status=500)
 
     def _handle_status(self) -> None:
         ensure_thermal_started()
-
         data = {
             "camera_initialized": thermal.camera_initialized,
             "recording": thermal.is_recording,
@@ -148,53 +150,61 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _handle_frame(self) -> None:
         ensure_thermal_started()
-
         snapshot = thermal.get_latest_frame()
         if snapshot is None or snapshot.rgb_data is None:
-            self._send_json(
-                {"error": "no_frame_available"},
-                status=503,
-            )
+            self._send_json({"error": "no_frame_available"}, status=503)
             return
 
         img = Image.fromarray(snapshot.rgb_data)
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=90)
-
         self._send_bytes(buf.getvalue(), "image/jpeg")
 
-    def _handle_screenshots(self) -> None:
-        shots = media.list_screenshots()
-        self._send_json({"items": shots})
+    def _handle_stream(self) -> None:
+        ensure_thermal_started()
 
-    def _handle_videos(self) -> None:
-        vids = media.list_videos()
-        self._send_json({"items": vids})
+        self.send_response(200)
+        self.send_header("Age", "0")
+        self.send_header("Cache-Control", "no-cache, private")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+
+        try:
+            while True:
+                snapshot = thermal.get_latest_frame()
+                if snapshot is None or snapshot.rgb_data is None:
+                    time.sleep(0.01)
+                    continue
+
+                img = Image.fromarray(snapshot.rgb_data)
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=85)
+                jpg = buf.getvalue()
+
+                self.wfile.write(b"--frame\r\n")
+                self.wfile.write(b"Content-Type: image/jpeg\r\n")
+                self.wfile.write(f"Content-Length: {len(jpg)}\r\n\r\n".encode("utf-8"))
+                self.wfile.write(jpg)
+                self.wfile.write(b"\r\n")
+                self.wfile.flush()
+                time.sleep(0.001)
+        except BrokenPipeError:
+            pass
+        except ConnectionResetError:
+            pass
 
     def _handle_palettes(self) -> None:
         self._send_json({"items": PALETTE_NAMES})
 
-    # -----------------------------
-    # POST-Handler
-    # -----------------------------
-
     def _handle_screenshot(self) -> None:
         ensure_thermal_started()
-
-        # einmal frischen Frame holen, damit last_rgb/last_thermal sicher aktuell sind
         thermal.get_latest_frame()
         path = thermal.save_screenshot()
-
         if not path:
-            self._send_json(
-                {
-                    "saved": None,
-                    "error": "no_frame_available",
-                },
-                status=503,
-            )
+            self._send_json({"saved": None, "error": "no_frame_available"}, status=503)
             return
-
         self._send_json({"saved": path})
 
     def _handle_record_start(self) -> None:
@@ -222,24 +232,16 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _handle_palette(self) -> None:
         ensure_thermal_started()
         data = self._read_json_body()
-
         palette = data.get("palette")
         if not palette:
             self._send_json(
-                {
-                    "error": "missing_palette",
-                    "available_palettes": PALETTE_NAMES,
-                },
+                {"error": "missing_palette", "available_palettes": PALETTE_NAMES},
                 status=400,
             )
             return
-
         thermal.set_palette(str(palette))
         self._send_json(
-            {
-                "palette": thermal.palette_name,
-                "available_palettes": PALETTE_NAMES,
-            }
+            {"palette": thermal.palette_name, "available_palettes": PALETTE_NAMES}
         )
 
     def _handle_gain(self) -> None:
@@ -250,12 +252,10 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _handle_emissivity(self) -> None:
         ensure_thermal_started()
         data = self._read_json_body()
-
         emissivity = data.get("emissivity")
         if emissivity is None:
             self._send_json({"error": "missing_emissivity"}, status=400)
             return
-
         emissivity = float(emissivity)
         thermal.set_emissivity(emissivity)
         self._send_json({"emissivity": emissivity})
@@ -263,7 +263,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 def run_server(host: str = "0.0.0.0", port: int = 8080) -> None:
     ensure_thermal_started()
-    server = HTTPServer((host, port), RequestHandler)
+    server = ThreadingHTTPServer((host, port), RequestHandler)
     print(f"Web API running on http://{host}:{port}")
     server.serve_forever()
 
