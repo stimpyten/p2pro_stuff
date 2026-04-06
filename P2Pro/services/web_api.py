@@ -8,7 +8,8 @@ import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
+import cv2
 
 from PIL import Image
 
@@ -32,7 +33,7 @@ def json_bytes(data: Any) -> bytes:
 
 
 class RequestHandler(BaseHTTPRequestHandler):
-    server_version = "P2ProWebAPI/0.8"
+    server_version = "P2ProWebAPI/1.0"
 
     def log_message(self, format: str, *args) -> None:
         print(f"[HTTP] {self.address_string()} - {format % args}")
@@ -103,6 +104,10 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._handle_stream()
             elif parsed.path == "/api/palettes":
                 self._handle_palettes()
+            elif parsed.path == "/api/colorbar":
+                self._handle_colorbar()
+            elif parsed.path == "/api/hover":
+                self._handle_hover(parsed)
             else:
                 self._send_json({"error": "Not Found"}, status=404)
         except BrokenPipeError:
@@ -131,6 +136,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._handle_emissivity()
             elif parsed.path == "/api/point":
                 self._handle_point()
+            elif parsed.path == "/api/point/move":
+                self._handle_point_move()
             else:
                 self._send_json({"error": "Not Found"}, status=404)
         except Exception as exc:
@@ -145,11 +152,15 @@ class RequestHandler(BaseHTTPRequestHandler):
         frame_height = None
         temp_min_c = None
         temp_max_c = None
+        min_pos = None
+        max_pos = None
 
         if snapshot is not None and snapshot.rgb_data is not None:
             frame_height, frame_width = snapshot.rgb_data.shape[:2]
             temp_min_c = snapshot.temp_min_c
             temp_max_c = snapshot.temp_max_c
+            min_pos = snapshot.min_pos
+            max_pos = snapshot.max_pos
 
         data = {
             "camera_initialized": thermal.camera_initialized,
@@ -164,6 +175,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             "frame_height": frame_height,
             "temp_min_c": temp_min_c,
             "temp_max_c": temp_max_c,
+            "min_pos": min_pos,
+            "max_pos": max_pos,
         }
         self._send_json(data)
 
@@ -213,6 +226,29 @@ class RequestHandler(BaseHTTPRequestHandler):
             pass
         except ConnectionResetError:
             pass
+
+    def _handle_colorbar(self) -> None:
+        """Gibt das aktuelle Paletten-Bild als schmales PNG für die Legende zurück."""
+        ensure_thermal_started()
+        bar_rgb = thermal.build_colormap_bar()
+        # Skaliere es für das Web auf 20px Breite, um die Darstellung zu optimieren
+        bar_img = cv2.resize(bar_rgb, (20, 256), interpolation=cv2.INTER_NEAREST)
+        img = Image.fromarray(bar_img)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        self._send_bytes(buf.getvalue(), "image/png")
+
+    def _handle_hover(self, parsed) -> None:
+        """Erlaubt extrem schnelle Abfragen für die Hover-Temperatur im Browser."""
+        ensure_thermal_started()
+        qs = parse_qs(parsed.query)
+        try:
+            x = int(qs.get("x", ["0"])[0])
+            y = int(qs.get("y", ["0"])[0])
+            temp = thermal.get_point_temperature(x, y)
+            self._send_json({"temp_c": temp})
+        except Exception:
+            self._send_json({"error": "invalid coordinates"}, status=400)
 
     def _handle_palettes(self) -> None:
         self._send_json({"items": PALETTE_NAMES})
@@ -290,6 +326,18 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
 
         thermal.toggle_measure_point(int(round(float(x))), int(round(float(y))))
+        self._send_json({"points_with_temp": thermal.get_measure_points_with_temperatures()})
+
+    def _handle_point_move(self) -> None:
+        ensure_thermal_started()
+        data = self._read_json_body()
+        idx = data.get("index")
+        x = data.get("x")
+        y = data.get("y")
+        
+        if idx is not None and x is not None and y is not None:
+            thermal.move_measure_point(int(idx), int(round(float(x))), int(round(float(y))))
+        
         self._send_json({"points_with_temp": thermal.get_measure_points_with_temperatures()})
 
 

@@ -46,6 +46,8 @@ class FrameSnapshot:
     thermal_data: np.ndarray
     temp_min_c: float
     temp_max_c: float
+    min_pos: Tuple[int, int]
+    max_pos: Tuple[int, int]
 
 
 class ThermalService:
@@ -154,6 +156,11 @@ class ThermalService:
             self.measure_points.append((int(x), int(y)))
             return list(self.measure_points)
 
+    def move_measure_point(self, index: int, x: int, y: int) -> None:
+        with self._lock:
+            if 0 <= index < len(self.measure_points):
+                self.measure_points[index] = (int(x), int(y))
+
     def set_measure_points(self, points: List[Tuple[int, int]]) -> None:
         with self._lock:
             self.measure_points = [(int(x), int(y)) for x, y in points]
@@ -201,8 +208,10 @@ class ThermalService:
         if thermal is None or rgb_picture is None:
             return None
 
-        temp_min_val = self.thermal_to_celsius(np.min(thermal))
-        temp_max_val = self.thermal_to_celsius(np.max(thermal))
+        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(thermal)
+
+        temp_min_val = self.thermal_to_celsius(min_val)
+        temp_max_val = self.thermal_to_celsius(max_val)
 
         snapshot = FrameSnapshot(
             frame_num=frame_num,
@@ -210,6 +219,8 @@ class ThermalService:
             thermal_data=np.array(thermal, copy=True),
             temp_min_c=temp_min_val,
             temp_max_c=temp_max_val,
+            min_pos=min_loc,
+            max_pos=max_loc,
         )
 
         with self._lock:
@@ -222,6 +233,8 @@ class ThermalService:
                 thermal_data=snapshot.thermal_data.copy(),
                 temp_min_c=snapshot.temp_min_c,
                 temp_max_c=snapshot.temp_max_c,
+                min_pos=snapshot.min_pos,
+                max_pos=snapshot.max_pos,
             )
             if self.is_recording:
                 self._record_frame(snapshot.rgb_data, snapshot.thermal_data)
@@ -249,6 +262,8 @@ class ThermalService:
                 thermal_data=self.latest_snapshot.thermal_data.copy(),
                 temp_min_c=self.latest_snapshot.temp_min_c,
                 temp_max_c=self.latest_snapshot.temp_max_c,
+                min_pos=self.latest_snapshot.min_pos,
+                max_pos=self.latest_snapshot.max_pos,
             )
 
     def wait_for_frame(self, timeout: float = 1.0, poll_interval: float = 0.02) -> Optional[FrameSnapshot]:
@@ -363,18 +378,20 @@ class ThermalService:
             path = self.start_recording()
             return {"is_recording": True, "recording_dir": path}
 
-    def build_colormap_bar(self, temp_min: float, temp_max: float) -> np.ndarray:
+    def build_colormap_bar(self) -> np.ndarray:
+        """Erzeugt ein schmales Bild, das den aktuellen Farbverlauf (Palette) darstellt."""
         cv_colormap = OPENCV_COLORMAP_MAP.get(self.palette_name, None)
-        temps_c = np.linspace(temp_max, temp_min, 256)
-        rawvals = np.clip((temps_c + 273.15) * 64.0, 0, 65535).astype(np.uint16)
-        ptp_val = np.ptp(rawvals) + 1e-8
-        norm = ((rawvals - rawvals.min()) / ptp_val * 255).astype(np.uint8)
-        bar = norm.reshape((256, 1))
+        
+        # Verlauf von 255 (Oben/Heiß) bis 0 (Unten/Kalt)
+        gradient = np.linspace(255, 0, 256).astype(np.uint8).reshape((256, 1))
+        
         if cv_colormap is not None:
-            bar_rgb = cv2.applyColorMap(bar, cv_colormap)
+            bar_rgb = cv2.applyColorMap(gradient, cv_colormap)
             bar_rgb = cv2.cvtColor(bar_rgb, cv2.COLOR_BGR2RGB)
         else:
-            bar_rgb = np.repeat(bar, 3, axis=1).reshape((256, 1, 3))
+            # Fallback für Grayscale ("White Hot")
+            bar_rgb = np.repeat(gradient, 3, axis=1).reshape((256, 1, 3))
+            
         return bar_rgb
 
     def _record_frame(self, rgb_picture: np.ndarray, thermal: np.ndarray) -> None:

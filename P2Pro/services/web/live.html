@@ -49,6 +49,7 @@
       width: 100%;
       display: block;
       background: #000;
+      user-select: none;
     }
     .overlay {
       position: absolute;
@@ -58,6 +59,38 @@
       pointer-events: auto;
       cursor: crosshair;
     }
+    
+    /* Legende (Colorbar) Container */
+    #colorbarContainer {
+      position: absolute;
+      right: 12px;
+      top: 12px;
+      bottom: 12px;
+      width: 60px;
+      pointer-events: none; /* Klicks gehen hindurch */
+      display: none; /* Standardmäßig aus */
+      flex-direction: column;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+    .colorbar-label {
+      background: rgba(0, 0, 0, 0.7);
+      color: #fff;
+      padding: 3px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: bold;
+      white-space: nowrap;
+    }
+    #colorbarImg {
+      width: 16px;
+      flex-grow: 1;
+      margin: 6px 0;
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 4px;
+      object-fit: fill;
+    }
+
     .row {
       display: flex;
       gap: 10px;
@@ -65,7 +98,7 @@
       align-items: center;
       margin-bottom: 12px;
     }
-    button, select, input {
+    button, select, input[type="number"] {
       background: var(--panel2);
       color: var(--text);
       border: 1px solid var(--border);
@@ -126,6 +159,21 @@
     .busy {
       outline: 1px solid var(--accent);
     }
+    
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+      cursor: pointer;
+    }
+    .checkbox-row input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
     @media (max-width: 980px) {
       .wrap { grid-template-columns: 1fr; }
     }
@@ -147,7 +195,15 @@
       </div>
 
       <div class="stream-wrap" id="streamWrap">
-        <img id="liveImage" class="stream" src="/api/stream" alt="Livebild" />
+        <img id="liveImage" class="stream" src="/api/stream" alt="Livebild" draggable="false" />
+        
+        <!-- NEU: Legende (Colorbar) -->
+        <div id="colorbarContainer">
+          <span class="colorbar-label" id="colorbarMax">MAX</span>
+          <img id="colorbarImg" src="" />
+          <span class="colorbar-label" id="colorbarMin">MIN</span>
+        </div>
+
         <canvas id="overlay" class="overlay"></canvas>
       </div>
 
@@ -175,6 +231,19 @@
         <input id="emissivityInput" type="number" min="0.01" max="1.00" step="0.01" value="0.95" />
       </div>
 
+      <label class="checkbox-row">
+        <input type="checkbox" id="showMinMaxToggle" />
+        Min/Max Marker im Bild
+      </label>
+      <label class="checkbox-row">
+        <input type="checkbox" id="showColorbarToggle" />
+        Farbskala (Legende) anzeigen
+      </label>
+      <label class="checkbox-row">
+        <input type="checkbox" id="showHoverToggle" />
+        Live-Hover Temperatur
+      </label>
+
       <div class="status-grid">
         <div class="status-item">
           <div class="label">Kamera</div>
@@ -195,7 +264,7 @@
       </div>
 
       <p class="note" style="margin-top: 14px;">
-        Klick ins Bild setzt einen Messpunkt. Klick nahe an einem bestehenden Punkt löscht ihn wieder. Die Temperatur erscheint direkt am Marker.
+        <strong>Tipp:</strong> Mit aktiviertem "Live-Hover" kannst du die Maus über das Bild bewegen, um die Temperatur sofort auszulesen.
       </p>
     </aside>
   </div>
@@ -203,6 +272,10 @@
   <script>
     const liveImage = document.getElementById("liveImage");
     const overlay = document.getElementById("overlay");
+    const colorbarContainer = document.getElementById("colorbarContainer");
+    const colorbarImg = document.getElementById("colorbarImg");
+    const colorbarMax = document.getElementById("colorbarMax");
+    const colorbarMin = document.getElementById("colorbarMin");
 
     const connState = document.getElementById("connState");
     const recState = document.getElementById("recState");
@@ -214,6 +287,11 @@
     const tempRangeState = document.getElementById("tempRangeState");
     const paletteSelect = document.getElementById("paletteSelect");
     const emissivityInput = document.getElementById("emissivityInput");
+    
+    const showMinMaxToggle = document.getElementById("showMinMaxToggle");
+    const showColorbarToggle = document.getElementById("showColorbarToggle");
+    const showHoverToggle = document.getElementById("showHoverToggle");
+    
     const feedback = document.getElementById("feedback");
 
     let emissivityTimer = null;
@@ -221,7 +299,26 @@
 
     let frameWidth = 0;
     let frameHeight = 0;
+    
+    // Daten für Points & MinMax
     let currentPoints = [];
+    let minPos = null;
+    let maxPos = null;
+    let globalMinTemp = null;
+    let globalMaxTemp = null;
+    let lastPaletteName = null;
+
+    // Drag & Drop
+    let dragIndex = -1;
+    let isDragging = false;
+    let clickStartX = 0;
+    let clickStartY = 0;
+
+    // Hover
+    let hoverX = null;
+    let hoverY = null;
+    let hoverTemp = null;
+    let hoverTimer = null;
 
     async function apiGet(url) {
       const res = await fetch(url);
@@ -259,10 +356,9 @@
       drawPoints();
     }
 
-    function drawPointLabel(ctx, x, y, label) {
+    function drawPointLabel(ctx, x, y, label, bgColor = "rgba(0, 0, 0, 0.75)") {
       ctx.font = "13px Arial";
       const paddingX = 6;
-      const paddingY = 4;
       const textWidth = ctx.measureText(label).width;
       const boxWidth = textWidth + paddingX * 2;
       const boxHeight = 22;
@@ -270,22 +366,32 @@
       let boxX = x + 12;
       let boxY = y - 30;
 
-      if (boxX + boxWidth > overlay.width) {
-        boxX = x - boxWidth - 12;
-      }
-      if (boxY < 0) {
-        boxY = y + 12;
-      }
+      if (boxX + boxWidth > overlay.width) boxX = x - boxWidth - 12;
+      if (boxY < 0) boxY = y + 12;
 
-      ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+      ctx.fillStyle = bgColor;
       ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
-
       ctx.strokeStyle = "rgba(255,255,255,0.35)";
-      ctx.lineWidth = 1;
       ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
-
       ctx.fillStyle = "rgba(255,255,255,0.95)";
       ctx.fillText(label, boxX + paddingX, boxY + 15);
+    }
+
+    function drawCrosshair(ctx, x, y, color) {
+      ctx.beginPath();
+      ctx.arc(x, y, 7, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(255,255,255,0.95)";
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(x - 12, y); ctx.lineTo(x + 12, y);
+      ctx.moveTo(x, y - 12); ctx.lineTo(x, y + 12);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+      ctx.stroke();
     }
 
     function drawPoints() {
@@ -294,86 +400,101 @@
 
       if (!frameWidth || !frameHeight) return;
 
+      // 1. Min/Max zeichnen
+      if (showMinMaxToggle.checked && minPos && maxPos && globalMinTemp !== null && globalMaxTemp !== null) {
+        const mx = (minPos[0] / frameWidth) * overlay.width;
+        const my = (minPos[1] / frameHeight) * overlay.height;
+        drawCrosshair(ctx, mx, my, "rgba(30, 144, 255, 0.8)"); // Blue
+        drawPointLabel(ctx, mx, my, `MIN: ${globalMinTemp.toFixed(1)} °C`, "rgba(0, 50, 150, 0.8)");
+
+        const hx = (maxPos[0] / frameWidth) * overlay.width;
+        const hy = (maxPos[1] / frameHeight) * overlay.height;
+        drawCrosshair(ctx, hx, hy, "rgba(255, 71, 87, 0.8)"); // Red
+        drawPointLabel(ctx, hx, hy, `MAX: ${globalMaxTemp.toFixed(1)} °C`, "rgba(150, 0, 0, 0.8)");
+      }
+
+      // 2. Feste Messpunkte zeichnen
       for (let i = 0; i < currentPoints.length; i++) {
         const point = currentPoints[i];
-        const px = point.x;
-        const py = point.y;
+        const x = (point.x / frameWidth) * overlay.width;
+        const y = (point.y / frameHeight) * overlay.height;
 
-        const x = (px / frameWidth) * overlay.width;
-        const y = (py / frameHeight) * overlay.height;
-
-        ctx.beginPath();
-        ctx.arc(x, y, 7, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(255, 80, 80, 0.95)";
-        ctx.fill();
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = "rgba(255,255,255,0.95)";
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.moveTo(x - 12, y);
-        ctx.lineTo(x + 12, y);
-        ctx.moveTo(x, y - 12);
-        ctx.lineTo(x, y + 12);
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
-        ctx.stroke();
+        const color = (i === dragIndex) ? "rgba(255, 200, 80, 0.8)" : "rgba(255, 80, 80, 0.95)";
+        drawCrosshair(ctx, x, y, color);
 
         ctx.font = "14px Arial";
         ctx.fillStyle = "rgba(255,255,255,0.95)";
         ctx.fillText(String(i + 1), x + 10, y - 10);
 
-        const tempText = point.temp_c === null || point.temp_c === undefined
-          ? `P${i + 1}: --.- °C`
-          : `P${i + 1}: ${point.temp_c.toFixed(1)} °C`;
-
+        const tempText = point.temp_c === null ? `P${i + 1}: --.- °C` : `P${i + 1}: ${point.temp_c.toFixed(1)} °C`;
         drawPointLabel(ctx, x, y, tempText);
+      }
+
+      // 3. Live-Hover zeichnen (immer on top)
+      if (showHoverToggle.checked && hoverX !== null && hoverY !== null && hoverTemp !== null) {
+        ctx.beginPath();
+        ctx.arc(hoverX, hoverY, 4, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255,255,255,0.8)";
+        ctx.fill();
+        drawPointLabel(ctx, hoverX, hoverY, `${hoverTemp.toFixed(1)} °C`, "rgba(80, 80, 80, 0.95)");
       }
     }
 
     async function loadStatus() {
+      if (isDragging) return; // UI update pausieren während Drag
+
       try {
         const data = await apiGet("/api/status");
         connState.textContent = "Verbunden";
         recState.textContent = `Recording: ${data.recording}`;
         gainState.textContent = `Gain: ${data.gain}`;
         paletteState.textContent = `Palette: ${data.palette}`;
-        cameraState.textContent = data.camera_initialized ? "initialisiert" : "nicht initialisiert";
         frameState.textContent = String(data.last_frame_num);
 
-        if (typeof data.frame_width === "number" && typeof data.frame_height === "number") {
-          frameWidth = data.frame_width;
-          frameHeight = data.frame_height;
-        }
+        if (typeof data.frame_width === "number") frameWidth = data.frame_width;
+        if (typeof data.frame_height === "number") frameHeight = data.frame_height;
+
+        minPos = data.min_pos;
+        maxPos = data.max_pos;
+        globalMinTemp = data.temp_min_c;
+        globalMaxTemp = data.temp_max_c;
 
         if (Array.isArray(data.points_with_temp)) {
           currentPoints = data.points_with_temp;
           pointsState.textContent = String(currentPoints.length);
-        } else if (Array.isArray(data.points)) {
-          currentPoints = data.points.map(([x, y]) => ({ x, y, temp_c: null }));
-          pointsState.textContent = String(currentPoints.length);
-        } else {
-          currentPoints = [];
-          pointsState.textContent = "-";
         }
 
-        if (typeof data.temp_min_c === "number" && typeof data.temp_max_c === "number") {
-          tempRangeState.textContent = `${data.temp_min_c} °C bis ${data.temp_max_c} °C`;
-        } else {
-          tempRangeState.textContent = "-";
+        if (globalMinTemp !== null && globalMaxTemp !== null) {
+          tempRangeState.textContent = `${globalMinTemp} °C bis ${globalMaxTemp} °C`;
         }
 
+        // Colorbar UI Logik
+        if (showColorbarToggle.checked) {
+          colorbarContainer.style.display = "flex";
+          if (globalMaxTemp !== null) colorbarMax.textContent = globalMaxTemp.toFixed(1) + " °C";
+          if (globalMinTemp !== null) colorbarMin.textContent = globalMinTemp.toFixed(1) + " °C";
+          
+          // Bild nur neu laden, wenn sich die Palette geändert hat
+          if (data.palette !== lastPaletteName) {
+            colorbarImg.src = `/api/colorbar?palette=${encodeURIComponent(data.palette)}&t=${Date.now()}`;
+            lastPaletteName = data.palette;
+          }
+        } else {
+          colorbarContainer.style.display = "none";
+        }
+
+        // Palette Select befüllen
         if (Array.isArray(data.available_palettes) && paletteSelect.options.length === 0) {
           suppressPaletteChange = true;
           for (const palette of data.available_palettes) {
             const opt = document.createElement("option");
             opt.value = palette;
             opt.textContent = palette;
-            if (palette === data.palette) opt.selected = true;
             paletteSelect.appendChild(opt);
           }
           suppressPaletteChange = false;
-        } else {
+        }
+        if (paletteSelect.value !== data.palette) {
           suppressPaletteChange = true;
           paletteSelect.value = data.palette;
           suppressPaletteChange = false;
@@ -382,23 +503,110 @@
         drawPoints();
       } catch (err) {
         connState.textContent = "Fehler";
-        console.error(err);
-        setFeedback("Status konnte nicht geladen werden.", true);
       }
     }
 
+    /* --- EVENTS --- */
+    
+    function getMouseImageCoords(event) {
+      const rect = overlay.getBoundingClientRect();
+      const displayX = event.clientX - rect.left;
+      const displayY = event.clientY - rect.top;
+      const imageX = Math.round((displayX / rect.width) * frameWidth);
+      const imageY = Math.round((displayY / rect.height) * frameHeight);
+      return { imageX, imageY, displayX, displayY };
+    }
+
+    overlay.addEventListener("mousedown", (event) => {
+      if (!frameWidth) return;
+      const { displayX, displayY } = getMouseImageCoords(event);
+      clickStartX = displayX; clickStartY = displayY;
+      isDragging = false; dragIndex = -1;
+
+      for (let i = 0; i < currentPoints.length; i++) {
+        const px = (currentPoints[i].x / frameWidth) * overlay.width;
+        const py = (currentPoints[i].y / frameHeight) * overlay.height;
+        if (Math.hypot(px - displayX, py - displayY) < 15) {
+          dragIndex = i;
+          break;
+        }
+      }
+    });
+
+    overlay.addEventListener("mousemove", (event) => {
+      if (!frameWidth) return;
+      const { imageX, imageY, displayX, displayY } = getMouseImageCoords(event);
+      
+      // Drag & Drop Logik
+      if (dragIndex !== -1) {
+        if (!isDragging && Math.hypot(displayX - clickStartX, displayY - clickStartY) > 3) isDragging = true;
+        if (isDragging) {
+          currentPoints[dragIndex].x = imageX;
+          currentPoints[dragIndex].y = imageY;
+          drawPoints();
+        }
+      } 
+      // Hover Logik
+      else if (showHoverToggle.checked) {
+        hoverX = displayX;
+        hoverY = displayY;
+        
+        // Throttling für API-Calls (ca 15 fps)
+        if (!hoverTimer) {
+          hoverTimer = setTimeout(async () => {
+            try {
+              const res = await apiGet(`/api/hover?x=${imageX}&y=${imageY}`);
+              hoverTemp = res.temp_c;
+              drawPoints();
+            } catch (e) {}
+            hoverTimer = null;
+          }, 66);
+        }
+      }
+    });
+
+    overlay.addEventListener("mouseup", async (event) => {
+      if (!frameWidth) return;
+      const { imageX, imageY } = getMouseImageCoords(event);
+
+      if (isDragging && dragIndex !== -1) {
+        try {
+          const result = await apiPost("/api/point/move", { index: dragIndex, x: imageX, y: imageY });
+          currentPoints = result.points_with_temp;
+          drawPoints();
+        } catch (err) {}
+      } else if (dragIndex === -1) {
+        // Normaler Klick
+        try {
+          const result = await apiPost("/api/point", { x: imageX, y: imageY });
+          currentPoints = result.points_with_temp;
+          drawPoints();
+        } catch (err) {}
+      }
+      isDragging = false; dragIndex = -1;
+    });
+
+    overlay.addEventListener("mouseleave", () => {
+      isDragging = false; dragIndex = -1;
+      hoverX = null; hoverY = null; hoverTemp = null;
+      drawPoints();
+    });
+    
+    showMinMaxToggle.addEventListener("change", drawPoints);
+    showColorbarToggle.addEventListener("change", loadStatus);
+    showHoverToggle.addEventListener("change", () => {
+        if(!showHoverToggle.checked) {
+            hoverX = null; hoverY = null; hoverTemp = null;
+            drawPoints();
+        }
+    });
+
     async function applyPalette() {
       if (suppressPaletteChange) return;
-      const value = paletteSelect.value;
       paletteSelect.classList.add("busy");
-      setFeedback(`Palette wird gesetzt: ${value} ...`);
       try {
-        await apiPost("/api/palette", { palette: value });
+        await apiPost("/api/palette", { palette: paletteSelect.value });
         await loadStatus();
-        setFeedback(`Palette gesetzt: ${value}`);
-      } catch (err) {
-        console.error(err);
-        setFeedback("Palette setzen fehlgeschlagen.", true);
       } finally {
         paletteSelect.classList.remove("busy");
       }
@@ -406,128 +614,27 @@
 
     async function applyEmissivity() {
       let value = parseFloat(emissivityInput.value);
-      if (Number.isNaN(value)) {
-        setFeedback("Ungültige Emissivität.", true);
-        return;
-      }
-
-      if (value < 0.01) value = 0.01;
-      if (value > 1.00) value = 1.00;
-      emissivityInput.value = value.toFixed(2);
-
+      if (Number.isNaN(value)) return;
       emissivityInput.classList.add("busy");
-      setFeedback(`Emissivität wird gesetzt: ${emissivityInput.value} ...`);
-
       try {
-        await apiPost("/api/emissivity", { emissivity: value });
+        await apiPost("/api/emissivity", { emissivity: Math.max(0.01, Math.min(1.00, value)) });
         await loadStatus();
-        setFeedback(`Emissivität gesetzt: ${emissivityInput.value}`);
-      } catch (err) {
-        console.error(err);
-        setFeedback("Emissivität setzen fehlgeschlagen.", true);
       } finally {
         emissivityInput.classList.remove("busy");
       }
     }
 
-    function scheduleEmissivityApply() {
-      if (emissivityTimer) clearTimeout(emissivityTimer);
-      emissivityTimer = setTimeout(() => {
-        applyEmissivity();
-      }, 450);
-    }
-
-    async function handleOverlayClick(event) {
-      if (!frameWidth || !frameHeight) {
-        setFeedback("Noch keine Bildgröße verfügbar.", true);
-        return;
-      }
-
-      const rect = overlay.getBoundingClientRect();
-      const displayX = event.clientX - rect.left;
-      const displayY = event.clientY - rect.top;
-
-      const imageX = Math.round((displayX / rect.width) * frameWidth);
-      const imageY = Math.round((displayY / rect.height) * frameHeight);
-
-      try {
-        const result = await apiPost("/api/point", { x: imageX, y: imageY });
-        if (Array.isArray(result.points_with_temp)) {
-          currentPoints = result.points_with_temp;
-          pointsState.textContent = String(currentPoints.length);
-        }
-        drawPoints();
-        setFeedback(`Messpunkt aktualisiert bei (${imageX}, ${imageY}).`);
-      } catch (err) {
-        console.error(err);
-        setFeedback("Messpunkt konnte nicht gesetzt werden.", true);
-      }
-    }
+    paletteSelect.addEventListener("change", applyPalette);
+    emissivityInput.addEventListener("input", () => {
+      clearTimeout(emissivityTimer);
+      emissivityTimer = setTimeout(applyEmissivity, 450);
+    });
 
     document.getElementById("reconnectBtn").addEventListener("click", reconnectStream);
-
-    document.getElementById("screenshotBtn").addEventListener("click", async () => {
-      setFeedback("Screenshot wird gespeichert ...");
-      try {
-        const result = await apiPost("/api/screenshot");
-        if (result.saved) {
-          setFeedback(`Screenshot gespeichert: ${result.saved}`);
-        } else {
-          setFeedback("Screenshot konnte nicht gespeichert werden.", true);
-        }
-      } catch (err) {
-        console.error(err);
-        setFeedback("Screenshot fehlgeschlagen.", true);
-      }
-    });
-
-    document.getElementById("recordStartBtn").addEventListener("click", async () => {
-      setFeedback("Recording wird gestartet ...");
-      try {
-        await apiPost("/api/record/start");
-        await loadStatus();
-        setFeedback("Recording gestartet.");
-      } catch (err) {
-        console.error(err);
-        setFeedback("Recording Start fehlgeschlagen.", true);
-      }
-    });
-
-    document.getElementById("recordStopBtn").addEventListener("click", async () => {
-      setFeedback("Recording wird gestoppt ...");
-      try {
-        await apiPost("/api/record/stop");
-        await loadStatus();
-        setFeedback("Recording gestoppt.");
-      } catch (err) {
-        console.error(err);
-        setFeedback("Recording Stop fehlgeschlagen.", true);
-      }
-    });
-
-    document.getElementById("gainBtn").addEventListener("click", async () => {
-      setFeedback("Gain wird umgeschaltet ...");
-      try {
-        await apiPost("/api/gain");
-        await loadStatus();
-        setFeedback("Gain umgeschaltet.");
-      } catch (err) {
-        console.error(err);
-        setFeedback("Gain umschalten fehlgeschlagen.", true);
-      }
-    });
-
-    paletteSelect.addEventListener("change", applyPalette);
-    emissivityInput.addEventListener("input", scheduleEmissivityApply);
-    emissivityInput.addEventListener("change", applyEmissivity);
-    emissivityInput.addEventListener("blur", applyEmissivity);
-
-    overlay.addEventListener("click", handleOverlayClick);
     liveImage.addEventListener("load", resizeOverlay);
     window.addEventListener("resize", resizeOverlay);
 
     setInterval(loadStatus, 1000);
-
     reconnectStream();
     loadStatus();
     resizeOverlay();
