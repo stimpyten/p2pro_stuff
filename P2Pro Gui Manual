@@ -1,0 +1,158 @@
+ChatGPT said:
+Natürlich! Hier ist eine Anleitung für alle 3 Apps (gui_neu, test_plotted, viewer_app) auf deinem Raspberry Pi Desktop – einschließlich Starten, Desktop-Shortcut und Tipps für den Betrieb.
+
+InfiRay P2Pro: Anleitung für alle 3 Apps
+1. Vorbereitung
+Projektverzeichnis
+Alle Programme liegen im Ordner:
+
+Copy code
+~/P2Pro-Viewer
+Python-Umgebung aktivieren
+Vor dem Start immer erst:
+
+bash
+Copy code
+cd ~/P2Pro-Viewer
+source venv/bin/activate
+(Das machen die Desktop-Shortcuts für dich automatisch.)
+
+2. Die Apps im Überblick
+a) Live-GUI (gui_neu)
+Name: InfiRay Live-GUI
+
+Datei: P2Pro/gui_neu.py
+
+Start:
+
+bash
+Copy code
+python3 -m P2Pro.gui_neu
+Funktionen:
+
+Zeigt das Livebild deiner InfiRay-Kamera an.
+
+Farbpaletten und Messpunkte setzen.
+
+Videoaufnahme und Screenshots mit Rohdaten (in Unterordnern).
+
+Gain-Umschaltung über einen Button.
+
+Vollbildmodus (ESC schließt).
+
+b) Farb-Heatmap-Viewer (test_plotted)
+Name: InfiRay Test-Plotted
+
+Datei: test_plotted.py
+
+Start:
+
+bash
+Copy code
+python3 test_plotted.py
+Funktionen:
+
+Zeigt eine spezielle Heatmap (rot für gewählten Temperaturbereich).
+
+Kein Bedienfeld, nur das Bild.
+
+Mit einem Klick irgendwo auf den Bildschirm wird die App sofort beendet.
+
+Vollbildmodus.
+
+c) Viewer-App (viewer_app)
+Name: InfiRay Viewer
+
+Datei: P2Pro/viewer_app.py
+
+Start:
+
+bash
+Copy code
+python3 -m P2Pro.viewer_app
+Funktionen:
+
+Modernes Menü zum Durchsuchen von Videos und Screenshots.
+
+Unterstützt Messpunkte, Screenshots aus Videos, Rohdaten etc.
+
+Bedienung vollständig per Maus.
+
+Im Vollbild-Modus mit Exit-Button.
+
+Zurück ins Menü jederzeit möglich.
+
+3. Desktop-Shortcuts
+Um jede App per Doppelklick zu starten:
+
+Schritt 1:
+Lege eine .desktop-Datei im Ordner ~/Desktop an.
+
+Beispiel für gui_neu.desktop:
+ini
+Copy code
+[Desktop Entry]
+Type=Application
+Name=InfiRay Live-GUI
+Exec=bash -c "cd ~/P2Pro-Viewer && source venv/bin/activate && python3 -m P2Pro.gui_neu"
+Icon=utilities-terminal
+Terminal=true
+Analog für die anderen Apps:
+Passe Name und Exec entsprechend an:
+
+Test-Plotted:
+
+ini
+Copy code
+[Desktop Entry]
+Type=Application
+Name=InfiRay Test-Plotted
+Exec=bash -c "cd ~/P2Pro-Viewer && source venv/bin/activate && python3 test_plotted.py"
+Icon=utilities-terminal
+Terminal=true
+Viewer-App:
+
+ini
+Copy code
+[Desktop Entry]
+Type=Application
+Name=InfiRay Viewer
+Exec=bash -c "cd ~/P2Pro-Viewer && source venv/bin/activate && python3 -m P2Pro.viewer_app"
+Icon=utilities-terminal
+Terminal=true
+Schritt 2:
+Rechte setzen:
+Rechtsklick auf die Datei → Eigenschaften → „Datei ist ein Programm, das als Programm ausgeführt werden kann“ anhaken
+Oder im Terminal:
+
+bash
+Copy code
+chmod +x ~/Desktop/gui_neu.desktop
+chmod +x ~/Desktop/test_plotted.desktop
+chmod +x ~/Desktop/viewer_app.desktop
+Optional:
+Über die Einstellungen des Dateimanagers den Punkt „Ausführbare Textdateien immer ausführen“ aktivieren, damit keine Rückfrage mehr kommt.
+
+4. Tipps
+Immer nur eine App mit Kamera verwenden! Die Kamera kann nur von einer App gleichzeitig genutzt werden.
+
+Dateien und Aufnahmen findest du in den Unterordnern screenshots und videos.
+
+Sollte etwas nicht funktionieren:
+
+Terminalausgaben beachten.
+
+Kamera muss immer eingesteckt sein, bevor das Programm startet.
+
+5. Troubleshooting
+Bei Problemen:
+
+Schließe andere Programme, die auf die Kamera zugreifen.
+
+Starte das Programm direkt im Terminal, um Fehlermeldungen zu sehen.
+
+Wenn du eine .desktop-Datei anlegst, aber immer eine Rückfrage beim Doppelklick bekommst, stelle sicher, dass:
+
+Die Datei ausführbar ist (siehe oben).
+
+Im Dateimanager das Verhalten für „ausführbare Textdateien“ auf „Ausführen“ steht.

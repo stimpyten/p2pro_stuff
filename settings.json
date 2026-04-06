@@ -1,0 +1,53 @@
+[
+    {
+        "type": "title",
+        "title": "Allgemeine Einstellungen"
+    },
+    {
+        "type": "path",
+        "title": "Screenshot-Verzeichnis",
+        "desc": "Ordner, in dem Screenshots gespeichert werden.",
+        "section": "Pfade",
+        "key": "screenshot_dir",
+        "dirselect": true
+    },
+    {
+        "type": "path",
+        "title": "Video-Verzeichnis",
+        "desc": "Ordner, in dem Video-Aufnahmen gespeichert werden.",
+        "section": "Pfade",
+        "key": "video_dir",
+        "dirselect": true
+    },
+    {
+        "type": "title",
+        "title": "Anzeige"
+    },
+    {
+        "type": "bool",
+        "title": "Vollbildmodus beim Start",
+        "desc": "Wenn aktiviert, startet die App im Vollbild. Erfordert einen Neustart der App.",
+        "section": "Anzeige",
+        "key": "fullscreen"
+    },
+    {
+        "type": "title",
+        "title": "Standardwerte beim Start"
+    },
+    {
+        "type": "options",
+        "title": "Standard-Farbpalette",
+        "desc": "Diese Farbpalette wird beim Start der App ausgewählt.",
+        "section": "Standardwerte",
+        "key": "palette",
+        "options": ["White Hot", "Iron Red", "Rainbow 1", "Rainbow 2", "Rainbow 3", "Red Hot", "Hot Red", "Black Hot"]
+    },
+    {
+        "type": "options",
+        "title": "Standard-Gain-Modus",
+        "desc": "Der Gain-Modus, der beim Start der App gesetzt wird.",
+        "section": "Standardwerte",
+        "key": "gain",
+        "options": ["Low", "High"]
+    }
+]

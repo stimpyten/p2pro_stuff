@@ -1,0 +1,15 @@
+initial_tests
+__pycache__
+test
+old_stuff
+screenshots/
+videos/
+*.mkv
+*.raw
+*.bin
+
+__pycache__/
+*.pyc
+venv/
+.venv/
+venv_old/
