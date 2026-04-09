@@ -239,6 +239,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._handle_media_frame_data(parsed)
             elif parsed.path == "/api/media/hover":
                 self._handle_media_hover(parsed)
+            elif parsed.path == "/api/media/thumbnail":
+                self._handle_media_thumbnail(parsed)
             elif parsed.path.startswith("/media_files/"):
                 self._serve_media_file(parsed.path)
             else:
@@ -447,10 +449,12 @@ class RequestHandler(BaseHTTPRequestHandler):
                         vid_file = d / "video.avi"
 
                     if vid_file.exists():
+                        vid_url = f"/media_files/videos/{d.name}/{vid_file.name}"
                         files["videos"].append(
                             {
                                 "name": d.name,
-                                "url": f"/media_files/videos/{d.name}/{vid_file.name}",
+                                "url": vid_url,
+                                "thumbnail": f"/api/media/thumbnail?url={vid_url}",
                                 "time": d.stat().st_mtime,
                             }
                         )
@@ -459,6 +463,42 @@ class RequestHandler(BaseHTTPRequestHandler):
         files["videos"].sort(key=lambda x: x["time"], reverse=True)
 
         self._send_json(files)
+
+    def _handle_media_thumbnail(self, parsed) -> None:
+        qs = parse_qs(parsed.query)
+        url = qs.get("url", [""])[0]
+        if not url:
+            self._send_json({"error": "url fehlt"}, status=400)
+            return
+
+        try:
+            video_path = resolve_media_url_to_path(url)
+        except ValueError:
+            self._send_json({"error": "Ungültige URL"}, status=400)
+            return
+
+        if not video_path.exists():
+            self._send_json({"error": "Datei nicht gefunden"}, status=404)
+            return
+
+        thumb_path = video_path.parent / "thumbnail.jpg"
+
+        if not thumb_path.exists():
+            cap = cv2.VideoCapture(str(video_path))
+            ret, frame = cap.read()
+            cap.release()
+            if not ret or frame is None:
+                self._send_json({"error": "Kein Frame lesbar"}, status=500)
+                return
+            cv2.imwrite(str(thumb_path), frame)
+
+        jpg = thumb_path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(len(jpg)))
+        self.send_header("Cache-Control", "max-age=86400")
+        self.end_headers()
+        self.wfile.write(jpg)
 
     def _handle_media_info(self, parsed) -> None:
         qs = parse_qs(parsed.query)

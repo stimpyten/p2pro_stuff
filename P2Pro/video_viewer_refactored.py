@@ -8,67 +8,11 @@ from kivy.graphics.texture import Texture
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.filechooser import FileChooserIconView
-from kivy.uix.image import Image
 from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
 
+from P2Pro.gui_utils import ClickableImage, draw_cross_with_outline, draw_text_with_outline
 from P2Pro.services.media_service import MediaService
-
-
-def draw_text_with_outline(img, text, org, font, font_scale, color_fg, color_outline=(0, 0, 0), thickness_fg=1, thickness_outline=3):
-    cv2.putText(img, text, org, font, font_scale, color_outline, thickness_outline, cv2.LINE_AA)
-    cv2.putText(img, text, org, font, font_scale, color_fg, thickness_fg, cv2.LINE_AA)
-
-
-def draw_cross_with_outline(img, pos, color_fg=(255, 255, 255), color_outline=(0, 0, 0), size=6, thickness_fg=1, thickness_outline=3):
-    x, y = pos
-    cv2.line(img, (x - size, y), (x + size, y), color_outline, thickness_outline, cv2.LINE_AA)
-    cv2.line(img, (x, y - size), (x, y + size), color_outline, thickness_outline, cv2.LINE_AA)
-    cv2.line(img, (x - size, y), (x + size, y), color_fg, thickness_fg, cv2.LINE_AA)
-    cv2.line(img, (x, y - size), (x, y + size), color_fg, thickness_fg, cv2.LINE_AA)
-
-
-class ClickableImage(Image):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.click_callback = None
-
-    def on_touch_down(self, touch):
-        if not self.collide_point(*touch.pos):
-            return super().on_touch_down(touch)
-        if self.texture is None:
-            return super().on_touch_down(touch)
-
-        w_tex, h_tex = self.texture.size
-        w_widget, h_widget = self.size
-        x_widget, y_widget = self.pos
-
-        aspect_tex = w_tex / h_tex
-        aspect_widget = w_widget / h_widget
-        if aspect_tex > aspect_widget:
-            scale = w_widget / w_tex
-            disp_w = w_widget
-            disp_h = h_tex * scale
-            offset_x = x_widget
-            offset_y = y_widget + (h_widget - disp_h) / 2
-        else:
-            scale = h_widget / h_tex
-            disp_w = w_tex * scale
-            disp_h = h_widget
-            offset_x = x_widget + (w_widget - disp_w) / 2
-            offset_y = y_widget
-
-        if not (offset_x <= touch.x <= offset_x + disp_w and offset_y <= touch.y <= offset_y + disp_h):
-            return super().on_touch_down(touch)
-
-        x_rel = (touch.x - offset_x) / disp_w
-        y_rel = (touch.y - offset_y) / disp_h
-        x_img = int(np.clip(x_rel * w_tex, 0, w_tex - 1))
-        y_img = int(np.clip((1 - y_rel) * h_tex, 0, h_tex - 1))
-
-        if self.click_callback:
-            self.click_callback((x_img, y_img), button=getattr(touch, "button", "left"))
-        return super().on_touch_down(touch)
 
 
 class VideoViewerScreen(Screen):
@@ -90,7 +34,7 @@ class VideoViewerScreen(Screen):
         backbtn.bind(on_press=lambda *a: setattr(self.manager, "current", "menu"))
         leftbar.add_widget(backbtn)
 
-        self.filechooser = FileChooserIconView(filters=["*.mkv"], path=videos_dir)
+        self.filechooser = FileChooserIconView(filters=["*.mp4", "*.avi", "*.mkv"], path=videos_dir)
         self.filechooser.bind(on_selection=self.on_file_selected)
         leftbar.add_widget(self.filechooser)
 

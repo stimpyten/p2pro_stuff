@@ -12,69 +12,12 @@ from kivy.graphics.texture import Texture
 from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
-from kivy.uix.image import Image
 from kivy.uix.label import Label
 from kivy.uix.spinner import Spinner
 from kivy.uix.widget import Widget
 
+from P2Pro.gui_utils import ClickableImage, draw_cross_with_outline, draw_text_with_outline
 from P2Pro.services.thermal_service import PALETTE_NAMES, ThermalService
-
-
-def draw_text_with_outline(img, text, org, font, font_scale, color_fg, color_outline=(0, 0, 0), thickness_fg=1, thickness_outline=3):
-    cv2.putText(img, text, org, font, font_scale, color_outline, thickness_outline, cv2.LINE_AA)
-    cv2.putText(img, text, org, font, font_scale, color_fg, thickness_fg, cv2.LINE_AA)
-
-
-def draw_cross_with_outline(img, pos, color_fg=(255, 255, 255), color_outline=(0, 0, 0), size=6, thickness_fg=1, thickness_outline=3):
-    x, y = pos
-    cv2.line(img, (x - size, y), (x + size, y), color_outline, thickness_outline, cv2.LINE_AA)
-    cv2.line(img, (x, y - size), (x, y + size), color_outline, thickness_outline, cv2.LINE_AA)
-    cv2.line(img, (x - size, y), (x + size, y), color_fg, thickness_fg, cv2.LINE_AA)
-    cv2.line(img, (x, y - size), (x, y + size), color_fg, thickness_fg, cv2.LINE_AA)
-
-
-class ClickableImage(Image):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.click_callback = None
-
-    def on_touch_down(self, touch):
-        if not self.collide_point(*touch.pos):
-            return super().on_touch_down(touch)
-        if self.texture is None:
-            return super().on_touch_down(touch)
-
-        w_tex, h_tex = self.texture.size
-        w_widget, h_widget = self.size
-        x_widget, y_widget = self.pos
-
-        aspect_tex = w_tex / h_tex
-        aspect_widget = w_widget / h_widget
-
-        if aspect_tex > aspect_widget:
-            scale = w_widget / w_tex
-            disp_w = w_widget
-            disp_h = h_tex * scale
-            offset_x = x_widget
-            offset_y = y_widget + (h_widget - disp_h) / 2
-        else:
-            scale = h_widget / h_tex
-            disp_w = w_tex * scale
-            disp_h = h_widget
-            offset_x = x_widget + (w_widget - disp_w) / 2
-            offset_y = y_widget
-
-        if not (offset_x <= touch.x <= offset_x + disp_w and offset_y <= touch.y <= offset_y + disp_h):
-            return super().on_touch_down(touch)
-
-        x_rel = (touch.x - offset_x) / disp_w
-        y_rel = (touch.y - offset_y) / disp_h
-        x_img = int(np.clip(x_rel * w_tex, 0, w_tex - 1))
-        y_img = int(np.clip((1 - y_rel) * h_tex, 0, h_tex - 1))
-
-        if self.click_callback:
-            self.click_callback((x_img, y_img), button=getattr(touch, "button", "left"))
-        return super().on_touch_down(touch)
 
 
 class ColorScale(Widget):
@@ -104,6 +47,7 @@ class ThermalApp(App):
         config.setdefaults("Pfade", {"screenshot_dir": "screenshots", "video_dir": "videos"})
         config.setdefaults("Standardwerte", {"palette": "White Hot", "gain": "Low"})
         config.setdefaults("Anzeige", {"fullscreen": "1"})
+        config.setdefaults("Kamera", {"emissivity": "1.0"})
 
     def build_settings(self, settings):
         settings.add_json_panel("App Einstellungen", self.config, "settings.json")
@@ -124,6 +68,11 @@ class ThermalApp(App):
         elif key == "gain":
             self.service.set_gain_mode(value)
             self.refresh_gain_button()
+        elif key == "emissivity":
+            try:
+                self.service.set_emissivity(float(value))
+            except ValueError:
+                pass
         elif section == "Anzeige" and key == "fullscreen":
             print("Vollbildmodus-Einstellung geändert. Bitte App neu starten.")
 
@@ -149,6 +98,7 @@ class ThermalApp(App):
 
         self.image = ClickableImage(allow_stretch=True)
         self.image.click_callback = self.on_image_click
+        self.image.move_callback = self.on_image_hover
         main_content.add_widget(self.image)
 
         scale_container = BoxLayout(orientation="vertical", size_hint_x=None, width=54)
@@ -186,6 +136,9 @@ class ThermalApp(App):
         settings_btn = Button(text="Einst.", size_hint_y=None, height=44)
         settings_btn.bind(on_press=self.open_settings)
         sidebar.add_widget(settings_btn)
+
+        self.hover_label = Label(text="", size_hint_y=None, height=30, font_size=11, halign="center", valign="middle")
+        sidebar.add_widget(self.hover_label)
         sidebar.add_widget(Widget())
         main_content.add_widget(sidebar)
 
@@ -207,7 +160,9 @@ class ThermalApp(App):
             palette_name = self.config.get("Standardwerte", "palette")
             gain_mode = self.config.get("Standardwerte", "gain")
 
+            emissivity = self.config.getfloat("Kamera", "emissivity")
             self.service.initialize(palette_name=palette_name, gain_mode=gain_mode)
+            self.service.set_emissivity(emissivity)
             self.service.start_video(-1)
 
             self.palette_spinner.text = palette_name
@@ -257,6 +212,10 @@ class ThermalApp(App):
         x, y = pos
         self.service.toggle_measure_point(x, y)
 
+    def on_image_hover(self, pos: Tuple[int, int]):
+        temp = self.service.get_point_temperature(*pos)
+        self.hover_label.text = f"{temp:.1f} °C" if temp is not None else ""
+
     def draw_measure_marker(self, rgb_img, thermal_data, pos):
         x, y = pos
         if 0 <= x < rgb_img.shape[1] and 0 <= y < rgb_img.shape[0]:
@@ -282,12 +241,16 @@ class ThermalApp(App):
         self.temp_max_label.text = f"{frame.temp_max_c:.1f}"
 
         try:
-            bar_rgb = self.service.build_colormap_bar(frame.temp_min_c, frame.temp_max_c)
+            bar_rgb = self.service.build_colormap_bar()
             self.scale_widget.update_texture(bar_rgb)
         except Exception as exc:
             print("Fehler Farbbalken:", exc)
 
         rgb_with_markers = frame.rgb_data.copy()
+        draw_cross_with_outline(rgb_with_markers, frame.max_pos, color_fg=(255, 71, 87))
+        draw_text_with_outline(rgb_with_markers, f"MAX {frame.temp_max_c:.1f}", (frame.max_pos[0] + 10, frame.max_pos[1] + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 71, 87))
+        draw_cross_with_outline(rgb_with_markers, frame.min_pos, color_fg=(30, 144, 255))
+        draw_text_with_outline(rgb_with_markers, f"MIN {frame.temp_min_c:.1f}", (frame.min_pos[0] + 10, frame.min_pos[1] + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (30, 144, 255))
         for pt in self.service.get_measure_points():
             self.draw_measure_marker(rgb_with_markers, frame.thermal_data, pt)
 

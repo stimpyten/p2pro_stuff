@@ -427,7 +427,9 @@
     let hoverX = null;
     let hoverY = null;
     let hoverTemp = null;
-    let hoverTimer = null;
+    let lastHoverImageX = null;
+    let lastHoverImageY = null;
+    let hoverPollInterval = null;
 
     let dragIndex = -1;
     let isDragging = false;
@@ -521,9 +523,13 @@
             </div>`;
         }
 
+        const thumbSrc = item.thumbnail ? encodeURIComponent(item.thumbnail) : "";
         return `
           <div class="card" onclick="openModal('video', decodeURIComponent('${safeUrl}'), '${safeName}')">
-            <div class="video-placeholder">▶️</div>
+            ${thumbSrc
+              ? `<img src="${item.thumbnail}" loading="lazy" alt="${item.name}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+              : ""}
+            <div class="video-placeholder" style="${thumbSrc ? "display:none" : ""}">▶</div>
             <div class="card-title">${formatTime(item.time)}<br><small>${item.name}</small></div>
           </div>`;
       }).join("");
@@ -987,18 +993,9 @@
 
       hoverX = displayX;
       hoverY = displayY;
-
-      if (!hoverTimer) {
-        hoverTimer = setTimeout(async () => {
-          try {
-            hoverTemp = await requestHoverTemp(imageX, imageY);
-            hoverState.textContent = hoverTemp === null ? "-" : `${hoverTemp.toFixed(1)} °C`;
-            drawOverlay();
-          } catch (_) {
-          }
-          hoverTimer = null;
-        }, 66);
-      }
+      lastHoverImageX = imageX;
+      lastHoverImageY = imageY;
+      startHoverPoll();
     });
 
     overlay.addEventListener("mouseup", async (event) => {
@@ -1056,17 +1053,36 @@
     overlay.addEventListener("mouseleave", () => {
       isDragging = false;
       dragIndex = -1;
-      hoverX = null;
-      hoverY = null;
+      stopHoverPoll();
       hoverTemp = null;
       hoverState.textContent = "-";
       drawOverlay();
     });
 
+    function startHoverPoll() {
+      if (hoverPollInterval) return;
+      hoverPollInterval = setInterval(async () => {
+        if (lastHoverImageX === null || !showHoverToggle.checked) return;
+        try {
+          hoverTemp = await requestHoverTemp(lastHoverImageX, lastHoverImageY);
+          hoverState.textContent = hoverTemp === null ? "-" : `${hoverTemp.toFixed(1)} °C`;
+          drawOverlay();
+        } catch (_) {}
+      }, 200);
+    }
+
+    function stopHoverPoll() {
+      clearInterval(hoverPollInterval);
+      hoverPollInterval = null;
+      hoverX = null;
+      hoverY = null;
+      lastHoverImageX = null;
+      lastHoverImageY = null;
+    }
+
     showHoverToggle.addEventListener("change", () => {
       if (!showHoverToggle.checked) {
-        hoverX = null;
-        hoverY = null;
+        stopHoverPoll();
         hoverTemp = null;
         hoverState.textContent = "-";
         drawOverlay();

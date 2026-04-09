@@ -319,7 +319,9 @@
     let hoverX = null;
     let hoverY = null;
     let hoverTemp = null;
-    let hoverTimer = null;
+    let lastHoverImageX = null;
+    let lastHoverImageY = null;
+    let hoverPollInterval = null;
 
     async function apiGet(url) {
       const res = await fetch(url);
@@ -557,18 +559,9 @@
       } else if (showHoverToggle.checked) {
         hoverX = displayX;
         hoverY = displayY;
-
-        if (!hoverTimer) {
-          hoverTimer = setTimeout(async () => {
-            try {
-              const res = await apiGet(`/api/hover?x=${imageX}&y=${imageY}`);
-              hoverTemp = res.temp_c;
-              drawPoints();
-            } catch (e) {
-            }
-            hoverTimer = null;
-          }, 66);
-        }
+        lastHoverImageX = imageX;
+        lastHoverImageY = imageY;
+        startHoverPoll();
       }
     });
 
@@ -601,18 +594,37 @@
     overlay.addEventListener("mouseleave", () => {
       isDragging = false;
       dragIndex = -1;
-      hoverX = null;
-      hoverY = null;
+      stopHoverPoll();
       hoverTemp = null;
       drawPoints();
     });
+
+    function startHoverPoll() {
+      if (hoverPollInterval) return;
+      hoverPollInterval = setInterval(async () => {
+        if (lastHoverImageX === null || !showHoverToggle.checked) return;
+        try {
+          const res = await apiGet(`/api/hover?x=${lastHoverImageX}&y=${lastHoverImageY}`);
+          hoverTemp = res.temp_c;
+          drawPoints();
+        } catch (e) {}
+      }, 200);
+    }
+
+    function stopHoverPoll() {
+      clearInterval(hoverPollInterval);
+      hoverPollInterval = null;
+      hoverX = null;
+      hoverY = null;
+      lastHoverImageX = null;
+      lastHoverImageY = null;
+    }
 
     showMinMaxToggle.addEventListener("change", drawPoints);
     showColorbarToggle.addEventListener("change", loadStatus);
     showHoverToggle.addEventListener("change", () => {
       if (!showHoverToggle.checked) {
-        hoverX = null;
-        hoverY = null;
+        stopHoverPoll();
         hoverTemp = null;
         drawPoints();
       }

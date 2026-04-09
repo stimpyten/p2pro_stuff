@@ -52,7 +52,7 @@ class MediaService:
         video_files: List[str] = []
         for root, _, files in os.walk(self.videos_dir):
             for name in files:
-                if name.lower().endswith(".mkv"):
+                if name.lower().endswith((".mp4", ".avi", ".mkv")):
                     video_files.append(os.path.join(root, name))
         video_files.sort(reverse=True)
         return video_files
