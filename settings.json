@@ -49,5 +49,16 @@
         "section": "Standardwerte",
         "key": "gain",
         "options": ["Low", "High"]
+    },
+    {
+        "type": "title",
+        "title": "Kameraeinstellungen"
+    },
+    {
+        "type": "numeric",
+        "title": "Emissivität",
+        "desc": "Emissivitätswert der Oberfläche (0.01–1.00). Beeinflusst die Temperaturmessung.",
+        "section": "Kamera",
+        "key": "emissivity"
     }
 ]
