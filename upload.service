@@ -21,10 +21,10 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 # TODO: set User to the user that runs the Pi app (e.g. User=pi)
-User=pi
+User=p2pro
 # TODO: update WorkingDirectory to the actual project path
-WorkingDirectory=/home/pi/p2pro_stuff
-ExecStart=/home/pi/p2pro_stuff/.venv/bin/python3 -m P2Pro.services.upload_service
+WorkingDirectory=/home/p2pro/p2pro_stuff
+ExecStart=/home/p2pro/p2pro_stuff/.venv/bin/python3 -m P2Pro.services.upload_service
 # Restart on failure with a short delay (e.g. if the server is temporarily unreachable)
 Restart=on-failure
 RestartSec=60

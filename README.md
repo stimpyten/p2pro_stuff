@@ -38,6 +38,12 @@ A web-based interface for the **InfiRay P2 Pro thermal camera**, running on a Ra
 - Frame-by-frame video scrubbing with thermal overlay
 - Thermal data memory-mapped from disk (`mmap`) — large recordings don't OOM
 
+### Server Sync
+- Automatically uploads new media to a remote server when the Pi connects to WiFi
+- Manual upload trigger via the web UI
+- Upload progress exposed via REST API (`/api/upload/status`)
+- Tracks already-uploaded bundles — no duplicate uploads
+
 ---
 
 ## Architecture
@@ -47,11 +53,13 @@ P2Pro_cmd.py          → Low-level USB commands (pyusb)
     ↓
 video.py              → OpenCV frame capture, dual-queue buffering
     ↓
+thermal_utils.py      → Standalone helpers (thermal_to_celsius) — no camera deps
 thermal_service.py    → Core logic: palettes, gain, emissivity, measurement points, recording
 media_service.py      → Screenshot/video file management and metadata
     ↓
 web_api.py            → ThreadingHTTPServer :8080, REST endpoints, MJPEG stream
     ↓       services/web/ → index.html, live.html, media.html (Vanilla JS)
+upload_service.py     → Pi-side upload client (triggered on WiFi connect or manually)
 
 gui_neu_refactored.py          → Kivy live viewer (ThermalApp)
 viewer_app_refactored.py       → Kivy media browser (ViewerApp)
@@ -92,6 +100,28 @@ python3 -m P2Pro.viewer_app_refactored    # Media browser
 
 ---
 
+### Server sync (optional)
+
+Copy and configure the upload client:
+```bash
+cp upload.conf.example upload.conf
+# edit upload.conf: set url and api_key
+```
+
+Install the systemd service so it runs automatically on WiFi connect:
+```bash
+sudo cp upload.service /etc/systemd/system/p2pro-upload.service
+sudo systemctl daemon-reload
+sudo systemctl enable p2pro-upload.service
+```
+
+Or trigger manually from the web UI, or with:
+```bash
+python3 -m P2Pro.services.upload_service
+```
+
+---
+
 ## Requirements
 
 - Raspberry Pi 4 (recommended)
@@ -118,6 +148,8 @@ python3 -m P2Pro.viewer_app_refactored    # Media browser
 | `/api/point/move` | POST | Move measurement point |
 | `/api/hover` | GET | Temperature at cursor position |
 | `/api/media/*` | GET/POST | File listing, serving, deletion |
+| `/api/upload/status` | GET | Upload progress and state |
+| `/api/upload/trigger` | POST | Manually trigger upload to server |
 
 ---
 
