@@ -27,6 +27,11 @@ PALETTE_MAP = {
 }
 PALETTE_NAMES = list(PALETTE_MAP.keys())
 
+
+def thermal_to_celsius(raw_value: float) -> float:
+    """Convert raw 16-bit thermal value to degrees Celsius."""
+    return round((float(raw_value) / 64.0) - 273.15, 1)
+
 OPENCV_COLORMAP_MAP = {
     "White Hot": None,
     "Iron Red": cv2.COLORMAP_INFERNO,
@@ -64,17 +69,18 @@ class ThermalService:
         self.gain_state = 0
         self.measure_points: List[Tuple[int, int]] = []
 
-        self.last_rgb: Optional[np.ndarray] = None
-        self.last_thermal: Optional[np.ndarray] = None
         self.last_frame_num = -1
         self.latest_snapshot: Optional[FrameSnapshot] = None
 
         self.is_recording = False
         self.recording_dir: Optional[str] = None
-        self.raw_frames: List[np.ndarray] = []
+        self._raw_fp = None
+        self._raw_frame_count: int = 0
+        self._raw_frame_shape: Optional[tuple] = None
         self.rgb_writer: Optional[cv2.VideoWriter] = None
 
         self._lock = threading.RLock()
+        self._frame_condition = threading.Condition()
 
     def initialize(self, palette_name: str = "White Hot", gain_mode: str = "Low") -> None:
         with self._lock:
@@ -102,9 +108,8 @@ class ThermalService:
             self.video_thread.start()
 
     def stop(self) -> None:
+        self.stop_recording()  # safe to call even when not recording (returns early)
         with self._lock:
-            if self.is_recording:
-                self.stop_recording()
             self.video.video_running = False
 
     def set_palette(self, palette_name: str) -> None:
@@ -170,7 +175,7 @@ class ThermalService:
             return list(self.measure_points)
 
     def thermal_to_celsius(self, raw_value: float) -> float:
-        return round((float(raw_value) / 64.0) - 273.15, 1)
+        return thermal_to_celsius(raw_value)
 
     def get_point_temperature(self, x: int, y: int) -> Optional[float]:
         with self._lock:
@@ -201,44 +206,44 @@ class ThermalService:
         return result
 
     def _make_snapshot(self, frame_data: dict) -> Optional[FrameSnapshot]:
-        thermal = frame_data.get("thermal_data")
-        rgb_picture = frame_data.get("rgb_data")
+        thermal_raw = frame_data.get("thermal_data")
+        rgb_raw = frame_data.get("rgb_data")
         frame_num = int(frame_data.get("frame_num", -1))
 
-        if thermal is None or rgb_picture is None:
+        if thermal_raw is None or rgb_raw is None:
             return None
 
-        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(thermal)
-        temp_min_val = self.thermal_to_celsius(min_val)
-        temp_max_val = self.thermal_to_celsius(max_val)
+        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(thermal_raw)
 
         snapshot = FrameSnapshot(
             frame_num=frame_num,
-            rgb_data=np.array(rgb_picture, copy=True),
-            thermal_data=np.array(thermal, copy=True),
-            temp_min_c=temp_min_val,
-            temp_max_c=temp_max_val,
+            rgb_data=np.array(rgb_raw, copy=True),
+            thermal_data=np.array(thermal_raw, copy=True),
+            temp_min_c=thermal_to_celsius(min_val),
+            temp_max_c=thermal_to_celsius(max_val),
             min_pos=min_loc,
             max_pos=max_loc,
         )
 
         with self._lock:
             self.last_frame_num = snapshot.frame_num
-            self.last_rgb = snapshot.rgb_data.copy()
-            self.last_thermal = snapshot.thermal_data.copy()
-            self.latest_snapshot = FrameSnapshot(
-                frame_num=snapshot.frame_num,
-                rgb_data=snapshot.rgb_data.copy(),
-                thermal_data=snapshot.thermal_data.copy(),
-                temp_min_c=snapshot.temp_min_c,
-                temp_max_c=snapshot.temp_max_c,
-                min_pos=snapshot.min_pos,
-                max_pos=snapshot.max_pos,
-            )
+            self.latest_snapshot = snapshot
             if self.is_recording:
                 self._record_frame(snapshot.rgb_data, snapshot.thermal_data)
 
-        return snapshot
+        with self._frame_condition:
+            self._frame_condition.notify_all()
+
+        # Return a defensive copy so callers can't mutate latest_snapshot
+        return FrameSnapshot(
+            frame_num=snapshot.frame_num,
+            rgb_data=snapshot.rgb_data.copy(),
+            thermal_data=snapshot.thermal_data.copy(),
+            temp_min_c=snapshot.temp_min_c,
+            temp_max_c=snapshot.temp_max_c,
+            min_pos=snapshot.min_pos,
+            max_pos=snapshot.max_pos,
+        )
 
     def get_latest_frame(self, queue_index: int = 1) -> Optional[FrameSnapshot]:
         frame_data = None
@@ -265,6 +270,12 @@ class ThermalService:
                 max_pos=self.latest_snapshot.max_pos,
             )
 
+    def wait_for_next_frame(self, timeout: float = 1.0) -> Optional[FrameSnapshot]:
+        """Block until a new camera frame arrives, then return it. Returns the last known frame on timeout."""
+        with self._frame_condition:
+            self._frame_condition.wait(timeout=timeout)
+        return self.get_latest_frame()
+
     def wait_for_frame(self, timeout: float = 1.0, poll_interval: float = 0.02) -> Optional[FrameSnapshot]:
         end_time = time.time() + timeout
         snapshot = self.get_latest_frame()
@@ -284,8 +295,9 @@ class ThermalService:
             return None
 
         with self._lock:
-            rgb = self.last_rgb.copy() if self.last_rgb is not None else snapshot.rgb_data.copy()
-            thermal = self.last_thermal.copy() if self.last_thermal is not None else snapshot.thermal_data.copy()
+            src = self.latest_snapshot if self.latest_snapshot is not None else snapshot
+            rgb = src.rgb_data.copy()
+            thermal = src.thermal_data.copy()
             points = [[int(x), int(y)] for (x, y) in self.measure_points]
 
         ts = time.strftime("%Y%m%d_%H%M%S")
@@ -314,12 +326,15 @@ class ThermalService:
             os.makedirs(rec_dir, exist_ok=True)
 
             self.recording_dir = rec_dir
-            self.raw_frames = []
+            self._raw_fp = open(os.path.join(rec_dir, "_rawframes.bin"), "wb")
+            self._raw_frame_count = 0
+            self._raw_frame_shape = None
             self.rgb_writer = None
             self.is_recording = True
             return rec_dir
 
     def stop_recording(self) -> Optional[str]:
+        # Phase 1: state changes under lock
         with self._lock:
             if not self.is_recording:
                 return self.recording_dir
@@ -333,47 +348,62 @@ class ThermalService:
                 self.rgb_writer.release()
                 self.rgb_writer = None
 
-            # Fix: Nur speichern wenn auch Frames aufgenommen wurden
-            if len(self.raw_frames) > 0:
-                np.save(os.path.join(recording_dir, "rawframes.npy"), np.stack(self.raw_frames, axis=0))
+            raw_fp = self._raw_fp
+            self._raw_fp = None
+            raw_frame_count = self._raw_frame_count
+            raw_frame_shape = self._raw_frame_shape
+            self._raw_frame_count = 0
+            self._raw_frame_shape = None
+            points = [[int(x), int(y)] for (x, y) in self.measure_points]
 
-            data = {"measure_points": [[int(x), int(y)] for (x, y) in self.measure_points]}
-            with open(os.path.join(recording_dir, "measure_points.json"), "w", encoding="utf-8") as handle:
-                json.dump(data, handle, indent=2)
+        # Phase 2: I/O outside lock so camera operations are not blocked
+        if raw_fp is not None:
+            raw_fp.close()
 
-            avi_path = os.path.join(recording_dir, "video.avi")
-            mp4_path = os.path.join(recording_dir, "video.mp4")
-            
-            # AVI in Web-freundliches MP4 (H.264) umwandeln
-            if os.path.exists(avi_path):
-                try:
-                    subprocess.run(
-                        [
-                            "ffmpeg", "-y", "-i", avi_path,
-                            "-c:v", "libx264", "-crf", "23",
-                            "-preset", "fast", "-pix_fmt", "yuv420p",
-                            mp4_path
-                        ],
-                        check=True,
-                        capture_output=True,
-                        text=True,
-                    )
-                    os.remove(avi_path) # Original löschen wenn erfolgreich
-                except FileNotFoundError:
-                    print("[WARN] ffmpeg ist nicht installiert! Das Video bleibt im .avi Format.")
-                except Exception as exc:
-                    print(f"[WARN] ffmpeg-Umwandlung fehlgeschlagen: {exc}")
+        bin_path = os.path.join(recording_dir, "_rawframes.bin")
+        if raw_frame_count > 0 and raw_frame_shape is not None and os.path.exists(bin_path):
+            frames = np.fromfile(bin_path, dtype=np.uint16).reshape(raw_frame_count, *raw_frame_shape)
+            np.save(os.path.join(recording_dir, "rawframes.npy"), frames)
+            del frames
+            os.remove(bin_path)
 
-            self.raw_frames = []
-            return recording_dir
+        data = {"measure_points": points}
+        with open(os.path.join(recording_dir, "measure_points.json"), "w", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=2)
+
+        avi_path = os.path.join(recording_dir, "video.avi")
+        mp4_path = os.path.join(recording_dir, "video.mp4")
+        if os.path.exists(avi_path):
+            threading.Thread(
+                target=self._convert_to_mp4,
+                args=(avi_path, mp4_path),
+                daemon=True,
+                name="P2ProFFmpegThread",
+            ).start()
+
+        return recording_dir
+
+    @staticmethod
+    def _convert_to_mp4(avi_path: str, mp4_path: str) -> None:
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", avi_path, "-c:v", "libx264", "-crf", "23", "-preset", "fast", "-pix_fmt", "yuv420p", mp4_path],
+                check=True, capture_output=True, text=True,
+            )
+            os.remove(avi_path)
+        except FileNotFoundError:
+            print("[WARN] ffmpeg ist nicht installiert! Das Video bleibt im .avi Format.")
+        except Exception as exc:
+            print(f"[WARN] ffmpeg-Umwandlung fehlgeschlagen: {exc}")
 
     def toggle_recording(self) -> Dict[str, Optional[str]]:
         with self._lock:
-            if self.is_recording:
-                path = self.stop_recording()
-                return {"is_recording": False, "recording_dir": path}
-            path = self.start_recording()
-            return {"is_recording": True, "recording_dir": path}
+            currently_recording = self.is_recording
+        if currently_recording:
+            path = self.stop_recording()
+            return {"is_recording": False, "recording_dir": path}
+        path = self.start_recording()
+        return {"is_recording": True, "recording_dir": path}
 
     def build_colormap_bar(self) -> np.ndarray:
         cv_colormap = OPENCV_COLORMAP_MAP.get(self.palette_name, None)
@@ -402,4 +432,10 @@ class ThermalService:
             )
 
         self.rgb_writer.write(cv2.cvtColor(rgb_picture, cv2.COLOR_RGB2BGR))
-        self.raw_frames.append(np.array(thermal, dtype=thermal.dtype))
+
+        if self._raw_fp is not None:
+            frame_arr = np.asarray(thermal, dtype=np.uint16)
+            if self._raw_frame_shape is None:
+                self._raw_frame_shape = frame_arr.shape
+            self._raw_fp.write(frame_arr.tobytes())
+            self._raw_frame_count += 1

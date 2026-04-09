@@ -1,6 +1,6 @@
 import threading
 import time
-from typing import Tuple
+from typing import Optional, Tuple
 
 import cv2
 import numpy as np
@@ -17,7 +17,7 @@ from kivy.uix.spinner import Spinner
 from kivy.uix.widget import Widget
 
 from P2Pro.gui_utils import ClickableImage, draw_cross_with_outline, draw_text_with_outline
-from P2Pro.services.thermal_service import PALETTE_NAMES, ThermalService
+from P2Pro.services.thermal_service import PALETTE_NAMES, ThermalService, thermal_to_celsius
 
 
 class ColorScale(Widget):
@@ -88,6 +88,8 @@ class ThermalApp(App):
 
         self.use_kivy_settings = True
         self.camera_initialized = False
+        self._last_palette: Optional[str] = None
+        self._cached_bar_rgb = None
         self.service = ThermalService(
             screenshot_dir=self.config.get("Pfade", "screenshot_dir"),
             video_dir=self.config.get("Pfade", "video_dir"),
@@ -219,8 +221,7 @@ class ThermalApp(App):
     def draw_measure_marker(self, rgb_img, thermal_data, pos):
         x, y = pos
         if 0 <= x < rgb_img.shape[1] and 0 <= y < rgb_img.shape[0]:
-            temp_val = thermal_data[y, x]
-            temp_c = round((temp_val / 64.0) - 273.16, 1)
+            temp_c = thermal_to_celsius(thermal_data[y, x])
             draw_cross_with_outline(rgb_img, (x, y))
             draw_text_with_outline(rgb_img, f"{temp_c:.1f}", (x + 10, y + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255))
 
@@ -240,11 +241,13 @@ class ThermalApp(App):
         self.temp_min_label.text = f"{frame.temp_min_c:.1f}"
         self.temp_max_label.text = f"{frame.temp_max_c:.1f}"
 
-        try:
-            bar_rgb = self.service.build_colormap_bar()
-            self.scale_widget.update_texture(bar_rgb)
-        except Exception as exc:
-            print("Fehler Farbbalken:", exc)
+        if self.service.palette_name != self._last_palette:
+            try:
+                self._cached_bar_rgb = self.service.build_colormap_bar()
+                self._last_palette = self.service.palette_name
+                self.scale_widget.update_texture(self._cached_bar_rgb)
+            except Exception as exc:
+                print("Fehler Farbbalken:", exc)
 
         rgb_with_markers = frame.rgb_data.copy()
         draw_cross_with_outline(rgb_with_markers, frame.max_pos, color_fg=(255, 71, 87))

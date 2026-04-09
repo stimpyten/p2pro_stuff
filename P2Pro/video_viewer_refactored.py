@@ -11,8 +11,9 @@ from kivy.uix.filechooser import FileChooserIconView
 from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
 
-from P2Pro.gui_utils import ClickableImage, draw_cross_with_outline, draw_text_with_outline
+from P2Pro.gui_utils import ClickableImage, draw_cross_with_outline, draw_text_with_outline, toggle_point
 from P2Pro.services.media_service import MediaService
+from P2Pro.services.thermal_service import thermal_to_celsius
 
 
 class VideoViewerScreen(Screen):
@@ -126,16 +127,7 @@ class VideoViewerScreen(Screen):
     def on_image_click(self, pos: Tuple[int, int], button="left"):
         if not self.rgb_frames or self.thermal_frames.size == 0:
             return
-
-        x, y = pos
-        threshold = 8
-        for idx, (mx, my) in enumerate(self.measure_points):
-            if abs(mx - x) <= threshold and abs(my - y) <= threshold:
-                del self.measure_points[idx]
-                self.update_image()
-                return
-
-        self.measure_points.append((int(x), int(y)))
+        self.measure_points = toggle_point(self.measure_points, *pos)
         self.update_image()
 
     def update_image(self):
@@ -149,8 +141,7 @@ class VideoViewerScreen(Screen):
 
         for x, y in self.measure_points:
             if 0 <= x < disp_img.shape[1] and 0 <= y < disp_img.shape[0]:
-                temp_val = thermal[y, x]
-                temp_c = round((temp_val / 64.0) - 273.16, 1)
+                temp_c = thermal_to_celsius(thermal[y, x])
                 draw_cross_with_outline(disp_img, (x, y))
                 draw_text_with_outline(
                     disp_img,

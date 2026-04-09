@@ -4,8 +4,8 @@ import io
 import json
 import mimetypes
 import os
-import time
 import traceback
+from collections import OrderedDict
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -17,7 +17,7 @@ import numpy as np
 from PIL import Image
 
 from P2Pro.services.media_service import MediaService
-from P2Pro.services.thermal_service import PALETTE_NAMES, ThermalService
+from P2Pro.services.thermal_service import PALETTE_NAMES, ThermalService, thermal_to_celsius
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -29,8 +29,9 @@ media_service = MediaService(
     videos_dir=thermal.video_dir,
 )
 
-# Einfache In-Memory-Caches, damit Rohdaten/Videos nicht bei jedem Hover neu geladen werden
-_media_cache: dict[tuple[str, str], Any] = {}
+# In-Memory-Cache für Mediendaten (LRU, max 3 Einträge)
+_MEDIA_CACHE_MAX = 3
+_media_cache: OrderedDict[tuple[str, str], Any] = OrderedDict()
 
 # Wichtige Video-Mimetypes für den Media Viewer
 mimetypes.add_type("video/mp4", ".mp4")
@@ -46,10 +47,6 @@ def ensure_thermal_started() -> None:
 
 def json_bytes(data: Any) -> bytes:
     return json.dumps(data, ensure_ascii=False).encode("utf-8")
-
-
-def thermal_to_celsius(raw_value: float) -> float:
-    return round((float(raw_value) / 64.0) - 273.15, 1)
 
 
 def get_temp_range_from_thermal(thermal_frame: np.ndarray) -> dict[str, Any]:
@@ -125,22 +122,23 @@ def resolve_media_url_to_path(url: str) -> Path:
     raise ValueError("Unbekannte Media-URL")
 
 
-def get_cached_screenshot(image_file: str):
-    key = ("screenshot", image_file)
-    bundle = _media_cache.get(key)
-    if bundle is None:
-        bundle = media_service.load_screenshot(image_file)
-        _media_cache[key] = bundle
+def _cache_get_or_load(key: tuple, loader):
+    if key in _media_cache:
+        _media_cache.move_to_end(key)  # mark as recently used
+        return _media_cache[key]
+    bundle = loader()
+    _media_cache[key] = bundle
+    while len(_media_cache) > _MEDIA_CACHE_MAX:
+        _media_cache.popitem(last=False)  # evict oldest
     return bundle
+
+
+def get_cached_screenshot(image_file: str):
+    return _cache_get_or_load(("screenshot", image_file), lambda: media_service.load_screenshot(image_file))
 
 
 def get_cached_video(video_file: str):
-    key = ("video", video_file)
-    bundle = _media_cache.get(key)
-    if bundle is None:
-        bundle = media_service.load_video(video_file)
-        _media_cache[key] = bundle
-    return bundle
+    return _cache_get_or_load(("video", video_file), lambda: media_service.load_video(video_file))
 
 
 def invalidate_media_cache_for_path(path_str: str) -> None:
@@ -332,9 +330,8 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             while True:
-                snapshot = thermal.get_latest_frame()
+                snapshot = thermal.wait_for_next_frame(timeout=1.0)
                 if snapshot is None or snapshot.rgb_data is None:
-                    time.sleep(0.01)
                     continue
                 img = Image.fromarray(snapshot.rgb_data)
                 buf = io.BytesIO()
@@ -346,7 +343,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.wfile.write(jpg)
                 self.wfile.write(b"\r\n")
                 self.wfile.flush()
-                time.sleep(0.001)
         except (BrokenPipeError, ConnectionResetError):
             pass
 

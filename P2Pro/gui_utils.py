@@ -1,6 +1,18 @@
+from typing import List, Tuple
+
 import cv2
 import numpy as np
 from kivy.uix.image import Image
+
+
+def toggle_point(
+    points: List[Tuple[int, int]], x: int, y: int, threshold: int = 8
+) -> List[Tuple[int, int]]:
+    """Remove the nearest point within threshold, or append a new one. Returns the updated list."""
+    for idx, (px, py) in enumerate(points):
+        if abs(px - x) <= threshold and abs(py - y) <= threshold:
+            return points[:idx] + points[idx + 1:]
+    return points + [(int(x), int(y))]
 
 
 def draw_text_with_outline(img, text, org, font, font_scale, color_fg, color_outline=(0, 0, 0), thickness_fg=1, thickness_outline=3):

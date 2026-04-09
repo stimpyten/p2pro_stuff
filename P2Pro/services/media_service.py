@@ -105,7 +105,7 @@ class MediaService:
             rgb_frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         cap.release()
 
-        thermal_frames = np.load(raw_file)
+        thermal_frames = np.load(raw_file, mmap_mode='r')
         if len(thermal_frames.shape) == 2:
             thermal_frames = thermal_frames[None, ...]
 
