@@ -17,7 +17,9 @@ import numpy as np
 from PIL import Image
 
 from P2Pro.services.media_service import MediaService
-from P2Pro.services.thermal_service import PALETTE_NAMES, ThermalService, thermal_to_celsius
+from P2Pro.services.thermal_service import PALETTE_NAMES, ThermalService
+from P2Pro.services.upload_service import read_status as upload_read_status, run_in_background as upload_run_in_background
+from P2Pro.thermal_utils import thermal_to_celsius
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -229,6 +231,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._handle_colorbar()
             elif parsed.path == "/api/hover":
                 self._handle_hover(parsed)
+            elif parsed.path == "/api/upload/status":
+                self._handle_upload_status()
             elif parsed.path == "/api/files":
                 self._handle_files()
             elif parsed.path == "/api/media/info":
@@ -281,6 +285,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._handle_media_points_save(req_data)
             elif parsed.path == "/api/media/video-frame-screenshot":
                 self._handle_media_video_frame_screenshot(req_data)
+            elif parsed.path == "/api/upload/trigger":
+                self._handle_upload_trigger()
             else:
                 self._send_json({"error": "Not Found"}, status=404)
         except Exception as exc:
@@ -730,6 +736,17 @@ class RequestHandler(BaseHTTPRequestHandler):
         )
         invalidate_media_cache_for_path(path)
         self._send_json(result)
+
+    def _handle_upload_status(self) -> None:
+        self._send_json(upload_read_status())
+
+    def _handle_upload_trigger(self) -> None:
+        status = upload_read_status()
+        if status.get("state") == "running":
+            self._send_json({"triggered": False, "reason": "already_running"})
+            return
+        upload_run_in_background()
+        self._send_json({"triggered": True})
 
     def _serve_media_file(self, path_str: str) -> None:
         parts = path_str.strip("/").split("/")

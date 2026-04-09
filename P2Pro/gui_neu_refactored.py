@@ -17,7 +17,8 @@ from kivy.uix.spinner import Spinner
 from kivy.uix.widget import Widget
 
 from P2Pro.gui_utils import ClickableImage, draw_cross_with_outline, draw_text_with_outline
-from P2Pro.services.thermal_service import PALETTE_NAMES, ThermalService, thermal_to_celsius
+from P2Pro.services.thermal_service import PALETTE_NAMES, ThermalService
+from P2Pro.thermal_utils import thermal_to_celsius
 
 
 class ColorScale(Widget):

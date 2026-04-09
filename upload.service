@@ -1,0 +1,34 @@
+# systemd service unit for the P2Pro upload client.
+#
+# Install:
+#   sudo cp upload.service /etc/systemd/system/p2pro-upload.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable p2pro-upload.service
+#
+# This service runs once after the network is online (e.g. after WiFi connects)
+# and uploads any new media bundles to the remote server.
+# It is a oneshot service — it exits when the upload is complete.
+#
+# To trigger manually without systemd:
+#   python3 -m P2Pro.services.upload_service
+
+[Unit]
+Description=P2Pro media upload client
+# Run after the network is fully online
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# TODO: set User to the user that runs the Pi app (e.g. User=pi)
+User=pi
+# TODO: update WorkingDirectory to the actual project path
+WorkingDirectory=/home/pi/p2pro_stuff
+ExecStart=/home/pi/p2pro_stuff/.venv/bin/python3 -m P2Pro.services.upload_service
+# Restart on failure with a short delay (e.g. if the server is temporarily unreachable)
+Restart=on-failure
+RestartSec=60
+
+[Install]
+# Run automatically when the system reaches multi-user.target after network-online
+WantedBy=multi-user.target

@@ -28,9 +28,7 @@ PALETTE_MAP = {
 PALETTE_NAMES = list(PALETTE_MAP.keys())
 
 
-def thermal_to_celsius(raw_value: float) -> float:
-    """Convert raw 16-bit thermal value to degrees Celsius."""
-    return round((float(raw_value) / 64.0) - 273.15, 1)
+from P2Pro.thermal_utils import thermal_to_celsius  # noqa: F401 (re-exported for legacy imports)
 
 OPENCV_COLORMAP_MAP = {
     "White Hot": None,

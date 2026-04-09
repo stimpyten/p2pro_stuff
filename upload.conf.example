@@ -1,0 +1,15 @@
+# P2Pro upload client configuration
+# Copy this file to upload.conf and fill in your values.
+# upload.conf must NOT be committed (it's in .gitignore).
+
+[server]
+# Full base URL of the media server (no trailing slash)
+url = https://your-server.example.com
+
+# API key — must match the key configured on the server
+api_key = REPLACE_WITH_YOUR_API_KEY
+
+[paths]
+# Directories on the Pi where media is saved (relative to working directory)
+screenshots_dir = screenshots
+videos_dir = videos

@@ -14,3 +14,7 @@ venv/
 .venv/
 venv_old/
 CLAUDE.md
+SERVER_PROJECT_BRIEF.md
+upload.conf
+upload_state.json
+upload_status.json

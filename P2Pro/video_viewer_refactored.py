@@ -13,7 +13,7 @@ from kivy.uix.screenmanager import Screen
 
 from P2Pro.gui_utils import ClickableImage, draw_cross_with_outline, draw_text_with_outline, toggle_point
 from P2Pro.services.media_service import MediaService
-from P2Pro.services.thermal_service import thermal_to_celsius
+from P2Pro.thermal_utils import thermal_to_celsius
 
 
 class VideoViewerScreen(Screen):
