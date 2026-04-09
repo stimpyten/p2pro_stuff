@@ -7,7 +7,7 @@ videos/
 *.mkv
 *.raw
 *.bin
-
+.vscode/
 __pycache__/
 *.pyc
 venv/
