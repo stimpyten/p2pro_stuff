@@ -284,14 +284,95 @@
         grid-template-columns: 1fr;
       }
     }
+
+    #upload-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.82);
+      z-index: 200;
+      justify-content: center;
+      align-items: center;
+    }
+    #upload-overlay.open {
+      display: flex;
+    }
+    #upload-overlay-box {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 36px 40px;
+      width: min(420px, 90vw);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 18px;
+    }
+    #upload-overlay-title {
+      font-size: 18px;
+      font-weight: 700;
+      text-align: center;
+    }
+    #upload-overlay-sub {
+      font-size: 13px;
+      color: var(--muted);
+      text-align: center;
+      min-height: 18px;
+      word-break: break-all;
+    }
+    #upload-overlay-track {
+      width: 100%;
+      background: var(--panel2);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      height: 10px;
+      overflow: hidden;
+    }
+    #upload-overlay-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: var(--accent);
+      width: 0%;
+      transition: width 0.3s;
+    }
+    #upload-overlay-count {
+      font-size: 13px;
+      color: var(--muted);
+    }
+    #upload-overlay-ok {
+      display: none;
+      padding: 10px 32px;
+      background: var(--accent);
+      border: none;
+      border-radius: 10px;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
   <header class="header">
     <a class="back" href="/">← Zur Startseite</a>
     <h1>🖼️ Media Viewer</h1>
-    <div style="width: 100px;"></div>
+    <div style="display:flex; align-items:center; gap:10px;">
+      <span class="pill" id="uploadStatePill">Upload: -</span>
+      <button id="uploadBtn" class="primary" style="padding: 8px 14px; font-size: 13px;">Upload starten</button>
+    </div>
   </header>
+
+  <div id="upload-overlay">
+    <div id="upload-overlay-box">
+      <div id="upload-overlay-title">Upload läuft…</div>
+      <div id="upload-overlay-track">
+        <div id="upload-overlay-fill"></div>
+      </div>
+      <div id="upload-overlay-count"></div>
+      <div id="upload-overlay-sub"></div>
+      <button id="upload-overlay-ok">OK</button>
+    </div>
+  </div>
 
   <div class="tabs">
     <div class="tab active" id="tab-screenshots" onclick="switchTab('screenshots')">📸 Screenshots</div>
@@ -1130,6 +1211,107 @@
     });
 
     loadFiles();
+
+    // -----------------------------------------------------------------------
+    // Upload overlay
+    // -----------------------------------------------------------------------
+    const uploadBtn = document.getElementById("uploadBtn");
+    const uploadStatePill = document.getElementById("uploadStatePill");
+    const uploadOverlay = document.getElementById("upload-overlay");
+    const uploadOverlayTitle = document.getElementById("upload-overlay-title");
+    const uploadOverlayFill = document.getElementById("upload-overlay-fill");
+    const uploadOverlayCount = document.getElementById("upload-overlay-count");
+    const uploadOverlaySub = document.getElementById("upload-overlay-sub");
+    const uploadOverlayOk = document.getElementById("upload-overlay-ok");
+
+    let uploadPollInterval = null;
+
+    function openUploadOverlay() {
+      uploadOverlayTitle.textContent = "Upload läuft…";
+      uploadOverlayFill.style.background = "var(--accent)";
+      uploadOverlayFill.style.width = "0%";
+      uploadOverlayCount.textContent = "";
+      uploadOverlaySub.textContent = "";
+      uploadOverlayOk.style.display = "none";
+      uploadOverlay.classList.add("open");
+    }
+
+    function finalizeUploadOverlay(success, message) {
+      uploadOverlayTitle.textContent = success ? "Upload abgeschlossen" : "Upload fehlgeschlagen";
+      uploadOverlayFill.style.background = success ? "var(--ok)" : "var(--danger)";
+      uploadOverlayFill.style.width = "100%";
+      uploadOverlaySub.textContent = message || "";
+      uploadOverlayOk.style.display = "block";
+    }
+
+    uploadOverlayOk.addEventListener("click", () => {
+      uploadOverlay.classList.remove("open");
+      uploadBtn.disabled = false;
+    });
+
+    function updateUploadUI(status) {
+      const { state, total, uploaded, current, last_error } = status;
+
+      const pillLabels = { idle: "Bereit", running: "Läuft…", done: "Fertig", error: "Fehler" };
+      uploadStatePill.textContent = `Upload: ${pillLabels[state] || state}`;
+      uploadStatePill.style.background = state === "running" ? "var(--warn)"
+        : state === "done" ? "var(--ok)"
+        : state === "error" ? "var(--danger)"
+        : "";
+
+      if (state === "running") {
+        const pct = total > 0 ? Math.round((uploaded / total) * 100) : 0;
+        uploadOverlayFill.style.width = `${pct}%`;
+        uploadOverlayCount.textContent = total > 0 ? `${uploaded} / ${total}` : "";
+        uploadOverlaySub.textContent = current || "";
+      } else if (state === "done") {
+        clearInterval(uploadPollInterval);
+        uploadPollInterval = null;
+        finalizeUploadOverlay(true, `${total} Bundle${total !== 1 ? "s" : ""} hochgeladen.`);
+      } else if (state === "error") {
+        clearInterval(uploadPollInterval);
+        uploadPollInterval = null;
+        finalizeUploadOverlay(false, last_error || "Unbekannter Fehler");
+      }
+    }
+
+    async function pollUploadStatus() {
+      try {
+        const status = await apiGet("/api/upload/status");
+        updateUploadUI(status);
+      } catch (e) {
+        // silently ignore poll errors
+      }
+    }
+
+    uploadBtn.addEventListener("click", async () => {
+      uploadBtn.disabled = true;
+      try {
+        await apiPost("/api/upload/trigger");
+        openUploadOverlay();
+        if (!uploadPollInterval) {
+          uploadPollInterval = setInterval(pollUploadStatus, 2000);
+        }
+      } catch (err) {
+        uploadStatePill.textContent = "Upload: Fehler";
+        uploadBtn.disabled = false;
+      }
+    });
+
+    // Reflect status on page load (e.g. if upload is already running)
+    (async () => {
+      try {
+        const status = await apiGet("/api/upload/status");
+        const pillLabels = { idle: "Bereit", running: "Läuft…", done: "Fertig", error: "Fehler" };
+        uploadStatePill.textContent = `Upload: ${pillLabels[status.state] || status.state}`;
+        if (status.state === "running") {
+          uploadBtn.disabled = true;
+          openUploadOverlay();
+          updateUploadUI(status);
+          uploadPollInterval = setInterval(pollUploadStatus, 2000);
+        }
+      } catch (e) {}
+    })();
   </script>
 </body>
 </html>

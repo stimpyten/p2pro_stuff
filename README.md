@@ -40,7 +40,8 @@ A web-based interface for the **InfiRay P2 Pro thermal camera**, running on a Ra
 
 ### Server Sync
 - Automatically uploads new media to a remote server when the Pi connects to WiFi
-- Manual upload trigger via the web UI
+- Manual upload trigger via the **Media Viewer** web UI — full-page progress overlay while running
+- Bundles zipped flat and sent via HTTP multipart POST (`POST /api/upload/ingest`, `X-API-Key` auth)
 - Upload progress exposed via REST API (`/api/upload/status`)
 - Tracks already-uploaded bundles — no duplicate uploads
 
@@ -55,11 +56,12 @@ video.py              → OpenCV frame capture, dual-queue buffering
     ↓
 thermal_utils.py      → Standalone helpers (thermal_to_celsius) — no camera deps
 thermal_service.py    → Core logic: palettes, gain, emissivity, measurement points, recording
+                        Background _frame_processor_loop drives MJPEG stream at 25 FPS
 media_service.py      → Screenshot/video file management and metadata
     ↓
 web_api.py            → ThreadingHTTPServer :8080, REST endpoints, MJPEG stream
     ↓       services/web/ → index.html, live.html, media.html (Vanilla JS)
-upload_service.py     → Pi-side upload client (triggered on WiFi connect or manually)
+upload_service.py     → Pi-side upload client: ZIP bundles, HTTP ingest, state tracking
 
 gui_neu_refactored.py          → Kivy live viewer (ThermalApp)
 viewer_app_refactored.py       → Kivy media browser (ViewerApp)

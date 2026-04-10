@@ -79,6 +79,7 @@ class ThermalService:
 
         self._lock = threading.RLock()
         self._frame_condition = threading.Condition()
+        self._processor_thread: Optional[threading.Thread] = None
 
     def initialize(self, palette_name: str = "White Hot", gain_mode: str = "Low") -> None:
         with self._lock:
@@ -104,6 +105,24 @@ class ThermalService:
                 name="P2ProVideoThread",
             )
             self.video_thread.start()
+
+            self._processor_thread = threading.Thread(
+                target=self._frame_processor_loop,
+                daemon=True,
+                name="P2ProFrameProcessor",
+            )
+            self._processor_thread.start()
+
+    def _frame_processor_loop(self) -> None:
+        """Continuously drain frame_queue[0], process each frame, and notify waiters."""
+        while True:
+            try:
+                frame_data = self.video.frame_queue[0].get(timeout=0.5)
+            except Exception:
+                if not self.video.video_running and self.video_thread and not self.video_thread.is_alive():
+                    break
+                continue
+            self._make_snapshot(frame_data)
 
     def stop(self) -> None:
         self.stop_recording()  # safe to call even when not recording (returns early)
@@ -177,9 +196,9 @@ class ThermalService:
 
     def get_point_temperature(self, x: int, y: int) -> Optional[float]:
         with self._lock:
-            if self.last_thermal is None:
+            if self.latest_snapshot is None:
                 return None
-            thermal = self.last_thermal
+            thermal = self.latest_snapshot.thermal_data
 
             h, w = thermal.shape[:2]
             x = max(0, min(int(x), w - 1))
@@ -272,7 +291,19 @@ class ThermalService:
         """Block until a new camera frame arrives, then return it. Returns the last known frame on timeout."""
         with self._frame_condition:
             self._frame_condition.wait(timeout=timeout)
-        return self.get_latest_frame()
+        with self._lock:
+            if self.latest_snapshot is None:
+                return None
+            s = self.latest_snapshot
+            return FrameSnapshot(
+                frame_num=s.frame_num,
+                rgb_data=s.rgb_data.copy(),
+                thermal_data=s.thermal_data.copy(),
+                temp_min_c=s.temp_min_c,
+                temp_max_c=s.temp_max_c,
+                min_pos=s.min_pos,
+                max_pos=s.max_pos,
+            )
 
     def wait_for_frame(self, timeout: float = 1.0, poll_interval: float = 0.02) -> Optional[FrameSnapshot]:
         end_time = time.time() + timeout

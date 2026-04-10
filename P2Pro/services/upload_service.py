@@ -13,10 +13,13 @@ Usage:
 from __future__ import annotations
 
 import configparser
+import io
 import json
 import os
 import threading
 import time
+import urllib.request
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -145,15 +148,73 @@ def _collect_bundles(screenshots_dir: str, videos_dir: str) -> list[dict[str, An
 # ---------------------------------------------------------------------------
 
 def _upload_bundle(bundle: dict[str, Any], server_url: str, api_key: str) -> None:
-    """Upload a single bundle to the server via HTTP multipart POST.
+    """Upload a single bundle to the server as a flat zip via multipart POST.
 
-    TODO: implement when server ingest endpoints are defined.
-    Expected endpoints (to be confirmed with server project):
-      POST {server_url}/api/ingest/screenshot   — multipart: png, raw, points (optional)
-      POST {server_url}/api/ingest/video        — multipart: video, rawframes, thumbnail, points (optional)
-    Auth header: X-API-Key: {api_key}
+    POST {server_url}/api/upload/ingest
+    Fields: bundle_type, bundle_id, file (zip archive of all bundle files, flat — no subdirs)
+    Auth: X-API-Key header
+    Response: {"ingested": "<bundle_id>", "type": "<bundle_type>"}
     """
-    raise NotImplementedError("Upload not yet implemented — server endpoints TBD")
+    bundle_type = bundle["type"]
+    if bundle_type == "screenshot":
+        bundle_id = bundle["id"].split(":", 1)[1]   # strip "screenshot:" prefix → stem
+    else:
+        bundle_id = bundle["dir_name"]              # e.g. rec_2024-01-15_10-30-00
+
+    # Build zip in memory — flat (no subdirectories)
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for f in bundle["files"]:
+            zf.write(f, arcname=Path(f).name)
+    zip_bytes = zip_buf.getvalue()
+
+    # Encode as multipart/form-data
+    boundary = "P2ProUploadBoundary"
+    parts: list[bytes] = []
+
+    def _field(name: str, value: str) -> bytes:
+        return (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
+            f"{value}\r\n"
+        ).encode()
+
+    parts.append(_field("bundle_type", bundle_type))
+    parts.append(_field("bundle_id", bundle_id))
+    parts.append(
+        f'--{boundary}\r\n'
+        f'Content-Disposition: form-data; name="file"; filename="{bundle_id}.zip"\r\n'
+        f'Content-Type: application/zip\r\n\r\n'.encode()
+        + zip_bytes + b"\r\n"
+    )
+    parts.append(f"--{boundary}--\r\n".encode())
+
+    body = b"".join(parts)
+
+    req = urllib.request.Request(
+        f"{server_url}/api/upload/ingest",
+        data=body,
+        headers={
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "X-API-Key": api_key,
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            raw = resp.read().decode()
+    except urllib.error.HTTPError as exc:
+        body_text = exc.read().decode(errors="replace")
+        raise RuntimeError(f"Server returned {exc.code}: {body_text}") from exc
+
+    try:
+        result = json.loads(raw)
+    except json.JSONDecodeError:
+        raise RuntimeError(f"Unexpected server response: {raw!r}")
+
+    if result.get("ingested") != bundle_id:
+        raise RuntimeError(f"Unexpected ingest response: {result}")
 
 
 # ---------------------------------------------------------------------------
